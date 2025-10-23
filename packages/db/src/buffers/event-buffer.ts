@@ -26,6 +26,11 @@ export class EventBuffer extends BaseBuffer {
   private lastScreenViewTTL = 60 * 60; // 1 hour
 
   private readonly redisKey = 'event-buffer';
+  private readonly retryKey = 'event-buffer:retry';
+  private readonly dlqKey = 'event-buffer:dlq'; // Dead Letter Queue
+  private readonly retryCounterKey = 'event:retry:count';
+  private readonly dlqCounterKey = 'event:dlq:count';
+  private readonly maxRetries = 3;
   private redis: Redis;
 
   constructor() {
@@ -34,6 +39,8 @@ export class EventBuffer extends BaseBuffer {
       onFlush: async () => {
         await this.processBuffer();
       },
+      // Enable parallel processing for better scalability with multiple workers
+      enableParallelProcessing: process.env.EVENT_BUFFER_PARALLEL === 'true',
     });
     this.redis = getRedisCache();
   }
@@ -237,89 +244,351 @@ export class EventBuffer extends BaseBuffer {
     return `session:last_screen_view:${projectId}:${profileId}`;
   }
 
-  async processBuffer() {
+  /**
+   * Atomically pop a batch of events from the buffer
+   * Multiple workers can call this in parallel without conflicts
+   */
+  private async popBatch(batchSize: number): Promise<string[]> {
     try {
-      // Get events from the start without removing them
-      const events = await this.redis.lrange(
-        this.redisKey,
-        0,
-        this.batchSize - 1,
-      );
+      // LPOP with count - single atomic operation (Redis 6.2+)
+      // This is significantly more efficient than looping
+      const items = await this.redis.lpop(this.redisKey, batchSize);
 
-      if (events.length === 0) {
-        this.logger.debug('No events to process');
+      if (!items) {
+        return [];
+      }
+
+      // LPOP with count returns either a single string or array
+      const itemsArray = Array.isArray(items) ? items : [items];
+
+      // Update counter atomically
+      if (itemsArray.length > 0) {
+        await this.redis.decrby(this.bufferCounterKey, itemsArray.length);
+      }
+
+      return itemsArray;
+    } catch (error) {
+      this.logger.error('Failed to pop batch atomically', { error });
+      return [];
+    }
+  }
+
+  /**
+   * Push failed events back to retry buffer or DLQ
+   * Updates counters atomically to maintain accurate counts in parallel mode
+   */
+  private async pushToRetry(
+    events: string[],
+    retryCount: number,
+  ): Promise<void> {
+    if (events.length === 0) return;
+
+    const multi = this.redis.multi();
+    let retryEvents = 0;
+    let dlqEvents = 0;
+
+    for (const event of events) {
+      const retryItem = JSON.stringify({
+        event,
+        retryCount: retryCount + 1,
+        lastAttempt: Date.now(),
+      });
+
+      if (retryCount >= this.maxRetries) {
+        // Max retries exceeded, send to DLQ
+        multi.rpush(this.dlqKey, retryItem);
+        dlqEvents++;
+      } else {
+        // Push to retry buffer
+        multi.rpush(this.retryKey, retryItem);
+        retryEvents++;
+      }
+    }
+
+    // Update counters atomically in the same transaction
+    if (retryEvents > 0) {
+      multi.incrby(this.retryCounterKey, retryEvents);
+    }
+    if (dlqEvents > 0) {
+      multi.incrby(this.dlqCounterKey, dlqEvents);
+    }
+
+    await multi.exec();
+
+    if (dlqEvents > 0) {
+      this.logger.warn(`Pushed ${dlqEvents} events to DLQ after max retries`, {
+        retryCount: retryCount + 1,
+      });
+    }
+    if (retryEvents > 0) {
+      this.logger.info(`Pushed ${retryEvents} events to retry buffer`, {
+        retryCount: retryCount + 1,
+      });
+    }
+  }
+
+  /**
+   * Process buffer with parallel worker support
+   * Multiple workers can call this simultaneously and will atomically claim batches
+   */
+  async processBuffer() {
+    const events = await this.popBatch(this.batchSize);
+
+    if (events.length === 0) {
+      this.logger.debug('No events to process');
+      return;
+    }
+
+    try {
+      await this.processEventsChunk(events);
+
+      this.logger.info('Processed events from Redis buffer', {
+        count: events.length,
+      });
+    } catch (error) {
+      this.logger.error('Error processing Redis buffer, pushing to retry', {
+        error,
+        eventCount: events.length,
+      });
+
+      // Push events back to retry buffer to prevent data loss
+      await this.pushToRetry(events, 0);
+    }
+  }
+
+  /**
+   * Process retry buffer - events that failed to insert
+   * Handles counter updates atomically for parallel worker safety
+   */
+  async processRetryBuffer() {
+    try {
+      // Pop from retry buffer atomically
+      const retryItems = await this.redis.lpop(this.retryKey, this.batchSize);
+
+      if (!retryItems) {
+        this.logger.debug('No retry events to process');
         return;
       }
 
-      const eventsToClickhouse = events
-        .map((e) => getSafeJson<IClickhouseEvent>(e))
-        .filter((e): e is IClickhouseEvent => e !== null);
+      const itemsArray = Array.isArray(retryItems) ? retryItems : [retryItems];
 
-      // Sort events by creation time
-      eventsToClickhouse.sort(
-        (a, b) =>
-          new Date(a.created_at || 0).getTime() -
-          new Date(b.created_at || 0).getTime(),
-      );
+      if (itemsArray.length === 0) return;
 
-      this.logger.info('Inserting events into ClickHouse', {
-        totalEvents: eventsToClickhouse.length,
-        chunks: Math.ceil(eventsToClickhouse.length / this.chunkSize),
+      // Decrement retry counter atomically (events are now claimed by this worker)
+      await this.redis.decrby(this.retryCounterKey, itemsArray.length);
+
+      // Parse retry items
+      const parsedItems = itemsArray
+        .map((item) => {
+          try {
+            return JSON.parse(item) as {
+              event: string;
+              retryCount: number;
+              lastAttempt: number;
+            };
+          } catch {
+            return null;
+          }
+        })
+        .filter((item): item is NonNullable<typeof item> => item !== null);
+
+      const events = parsedItems.map((item) => item.event);
+      const maxRetryCount = Math.max(...parsedItems.map((i) => i.retryCount));
+
+      this.logger.info('Processing retry buffer', {
+        count: events.length,
+        maxRetryCount,
       });
 
-      // Insert events into ClickHouse in chunks using CSV format with headers
-      for (const chunk of this.chunks(eventsToClickhouse, this.chunkSize)) {
-        if (process.env.USE_CSV === 'true' || process.env.USE_CSV === '1') {
-          // Convert events to CSV format
-          const csvRows = chunk.map((event) => this.eventToCsvRow(event));
-          const csv = [this.getCsvHeaders(), ...csvRows].join('\n');
+      try {
+        await this.processEventsChunk(events);
 
-          // Create a readable stream in binary mode for CSV
-          const csvStream = Readable.from(csv, { objectMode: false });
+        this.logger.info('Successfully processed retry events', {
+          count: events.length,
+        });
+      } catch (error) {
+        this.logger.error('Failed to process retry events', {
+          error,
+          eventCount: events.length,
+          maxRetryCount,
+        });
 
-          await ch.insert({
-            table: 'events',
-            values: csvStream,
-            format: 'CSV',
-            clickhouse_settings: {
-              input_format_csv_skip_first_lines: '1',
-              format_csv_allow_single_quotes: 1,
-              format_csv_allow_double_quotes: 1,
-            },
-          });
-        } else {
-          await ch.insert({
-            table: 'events',
-            values: chunk,
-            format: 'JSONEachRow',
-          });
-        }
+        // Push back to retry/DLQ with incremented count
+        // This will update the appropriate counter (retry or DLQ)
+        await this.pushToRetry(events, maxRetryCount);
       }
-
-      // Publish "saved" events
-      const pubMulti = getRedisPub().multi();
-      for (const event of eventsToClickhouse) {
-        await publishEvent('events', 'saved', transformEvent(event), pubMulti);
-      }
-      await pubMulti.exec();
-
-      // Only remove events after successful insert and update counter
-      const multi = this.redis.multi();
-      multi
-        .ltrim(this.redisKey, events.length, -1)
-        .decrby(this.bufferCounterKey, events.length);
-      await multi.exec();
-
-      this.logger.info('Processed events from Redis buffer', {
-        count: eventsToClickhouse.length,
-      });
     } catch (error) {
-      this.logger.error('Error processing Redis buffer', { error });
+      this.logger.error('Error in retry buffer processing', { error });
     }
+  }
+
+  /**
+   * Process a chunk of event strings (used by both processBuffer and drainBuffer)
+   */
+  private async processEventsChunk(events: string[]) {
+    const eventsToClickhouse = events
+      .map((e) => getSafeJson<IClickhouseEvent>(e))
+      .filter((e): e is IClickhouseEvent => e !== null);
+
+    // Sort events by creation time
+    eventsToClickhouse.sort(
+      (a, b) =>
+        new Date(a.created_at || 0).getTime() -
+        new Date(b.created_at || 0).getTime(),
+    );
+
+    this.logger.debug('Inserting events into ClickHouse', {
+      totalEvents: eventsToClickhouse.length,
+      chunks: Math.ceil(eventsToClickhouse.length / this.chunkSize),
+    });
+
+    // Insert events into ClickHouse in chunks using CSV format with headers
+    for (const chunk of this.chunks(eventsToClickhouse, this.chunkSize)) {
+      if (process.env.USE_CSV === 'true' || process.env.USE_CSV === '1') {
+        // Convert events to CSV format
+        const csvRows = chunk.map((event) => this.eventToCsvRow(event));
+        const csv = [this.getCsvHeaders(), ...csvRows].join('\n');
+
+        // Create a readable stream in binary mode for CSV
+        const csvStream = Readable.from(csv, { objectMode: false });
+
+        await ch.insert({
+          table: 'events',
+          values: csvStream,
+          format: 'CSV',
+          clickhouse_settings: {
+            input_format_csv_skip_first_lines: '1',
+            format_csv_allow_single_quotes: 1,
+            format_csv_allow_double_quotes: 1,
+          },
+        });
+      } else {
+        await ch.insert({
+          table: 'events',
+          values: chunk,
+          format: 'JSONEachRow',
+        });
+      }
+    }
+
+    // Publish "saved" events
+    const pubMulti = getRedisPub().multi();
+    for (const event of eventsToClickhouse) {
+      await publishEvent('events', 'saved', transformEvent(event), pubMulti);
+    }
+    await pubMulti.exec();
   }
 
   async getBufferSize() {
     return this.getBufferSizeWithCounter(() => this.redis.llen(this.redisKey));
+  }
+
+  /**
+   * Get retry buffer size with counter optimization
+   */
+  async getRetryBufferSize(): Promise<number> {
+    try {
+      const counterValue = await this.redis.get(this.retryCounterKey);
+      if (counterValue !== null) {
+        const parsed = Number.parseInt(counterValue, 10);
+        if (!Number.isNaN(parsed)) {
+          return Math.max(0, parsed);
+        }
+      }
+
+      // Fallback: get actual size and initialize counter
+      const count = await this.redis.llen(this.retryKey);
+      await this.redis.set(this.retryCounterKey, count.toString());
+      return count;
+    } catch (error) {
+      this.logger.warn(
+        'Failed to get retry buffer size from counter, using fallback',
+        { error },
+      );
+      return this.redis.llen(this.retryKey);
+    }
+  }
+
+  /**
+   * Get dead letter queue size with counter optimization
+   */
+  async getDLQSize(): Promise<number> {
+    try {
+      const counterValue = await this.redis.get(this.dlqCounterKey);
+      if (counterValue !== null) {
+        const parsed = Number.parseInt(counterValue, 10);
+        if (!Number.isNaN(parsed)) {
+          return Math.max(0, parsed);
+        }
+      }
+
+      // Fallback: get actual size and initialize counter
+      const count = await this.redis.llen(this.dlqKey);
+      await this.redis.set(this.dlqCounterKey, count.toString());
+      return count;
+    } catch (error) {
+      this.logger.warn('Failed to get DLQ size from counter, using fallback', {
+        error,
+      });
+      return this.redis.llen(this.dlqKey);
+    }
+  }
+
+  /**
+   * Get comprehensive buffer stats
+   */
+  async getBufferStats() {
+    const [main, retry, dlq] = await Promise.all([
+      this.getBufferSize(),
+      this.getRetryBufferSize(),
+      this.getDLQSize(),
+    ]);
+
+    return {
+      main,
+      retry,
+      dlq,
+      total: main + retry,
+    };
+  }
+
+  /**
+   * Inspect DLQ events (for debugging/monitoring)
+   * @param limit - Number of events to inspect (default: 10)
+   */
+  async inspectDLQ(limit = 10) {
+    const items = await this.redis.lrange(this.dlqKey, 0, limit - 1);
+
+    return items
+      .map((item) => {
+        try {
+          return JSON.parse(item) as {
+            event: string;
+            retryCount: number;
+            lastAttempt: number;
+          };
+        } catch {
+          return null;
+        }
+      })
+      .filter((item): item is NonNullable<typeof item> => item !== null);
+  }
+
+  /**
+   * Clear dead letter queue (use with caution!)
+   * Also resets the DLQ counter
+   */
+  async clearDLQ(): Promise<number> {
+    const size = await this.getDLQSize();
+    if (size > 0) {
+      const multi = this.redis.multi();
+      multi.del(this.dlqKey);
+      multi.set(this.dlqCounterKey, '0');
+      await multi.exec();
+
+      this.logger.warn('DLQ cleared', { eventsRemoved: size });
+    }
+    return size;
   }
 
   private async incrementActiveVisitorCount(

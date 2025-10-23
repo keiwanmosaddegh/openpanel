@@ -1,3 +1,4 @@
+import { Readable } from 'node:stream';
 import { getSafeJson } from '@openpanel/json';
 import {
   type Redis,
@@ -35,6 +36,92 @@ export class EventBuffer extends BaseBuffer {
       },
     });
     this.redis = getRedisCache();
+  }
+
+  /**
+   * Convert event to CSV row format with headers
+   * Order must match the ClickHouse table schema
+   */
+  private eventToCsvRow(event: IClickhouseEvent): string {
+    const escapeCsvValue = (value: any): string => {
+      if (value === null || value === undefined) return '';
+      const str = String(value);
+      // Replace double quotes with single quotes, then escape single quotes by doubling them
+      const withSingleQuotes = str.replace(/"/g, "'");
+      return `'${withSingleQuotes.replace(/'/g, "''")}'`;
+    };
+
+    // Order matches the ClickHouse table schema exactly
+    const columns = [
+      event.id, // id UUID
+      event.name, // name
+      event.sdk_name, // sdk_name
+      event.sdk_version, // sdk_version
+      event.device_id, // device_id
+      event.profile_id, // profile_id
+      event.project_id, // project_id
+      event.session_id, // session_id
+      event.path, // path
+      event.origin, // origin
+      event.referrer, // referrer
+      event.referrer_name, // referrer_name
+      event.referrer_type, // referrer_type
+      event.duration, // duration
+      escapeCsvValue(JSON.stringify(event.properties)), // properties
+      event.created_at, // created_at
+      event.country, // country
+      event.city, // city
+      event.region, // region
+      event.longitude, // longitude
+      event.latitude, // latitude
+      event.os, // os
+      event.os_version, // os_version
+      event.browser, // browser
+      event.browser_version, // browser_version
+      event.device, // device
+      event.brand, // brand
+      event.model, // model
+      event.imported_at, // imported_at
+    ];
+
+    return columns.join(',');
+  }
+
+  /**
+   * Get CSV headers matching the ClickHouse table schema
+   */
+  private getCsvHeaders(): string {
+    return [
+      'id',
+      'name',
+      'sdk_name',
+      'sdk_version',
+      'device_id',
+      'profile_id',
+      'project_id',
+      'session_id',
+      'path',
+      'origin',
+      'referrer',
+      'referrer_name',
+      'referrer_type',
+      'duration',
+      'properties',
+      'created_at',
+      'country',
+      'city',
+      'region',
+      'longitude',
+      'latitude',
+      'os',
+      'os_version',
+      'browser',
+      'browser_version',
+      'device',
+      'brand',
+      'model',
+      'imported_at',
+    ].join(',');
   }
 
   bulkAdd(events: IClickhouseEvent[]) {
@@ -180,13 +267,33 @@ export class EventBuffer extends BaseBuffer {
         chunks: Math.ceil(eventsToClickhouse.length / this.chunkSize),
       });
 
-      // Insert events into ClickHouse in chunks
+      // Insert events into ClickHouse in chunks using CSV format with headers
       for (const chunk of this.chunks(eventsToClickhouse, this.chunkSize)) {
-        await ch.insert({
-          table: 'events',
-          values: chunk,
-          format: 'JSONEachRow',
-        });
+        if (process.env.USE_CSV === 'true' || process.env.USE_CSV === '1') {
+          // Convert events to CSV format
+          const csvRows = chunk.map((event) => this.eventToCsvRow(event));
+          const csv = [this.getCsvHeaders(), ...csvRows].join('\n');
+
+          // Create a readable stream in binary mode for CSV
+          const csvStream = Readable.from(csv, { objectMode: false });
+
+          await ch.insert({
+            table: 'events',
+            values: csvStream,
+            format: 'CSV',
+            clickhouse_settings: {
+              input_format_csv_skip_first_lines: '1',
+              format_csv_allow_single_quotes: 1,
+              format_csv_allow_double_quotes: 1,
+            },
+          });
+        } else {
+          await ch.insert({
+            table: 'events',
+            values: chunk,
+            format: 'JSONEachRow',
+          });
+        }
       }
 
       // Publish "saved" events

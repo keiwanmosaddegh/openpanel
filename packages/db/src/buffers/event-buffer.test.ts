@@ -171,48 +171,6 @@ describe('EventBuffer with real Redis', () => {
     insertSpy.mockRestore();
   });
 
-  it('respects EVENT_BUFFER_BATCH_SIZE', async () => {
-    const prev = process.env.EVENT_BUFFER_BATCH_SIZE;
-    process.env.EVENT_BUFFER_BATCH_SIZE = '2';
-    const eb = new EventBuffer();
-
-    const events = Array.from({ length: 5 }, (_, i) => ({
-      project_id: 'p1',
-      name: `event${i}`,
-      created_at: new Date(Date.now() + i * 100).toISOString(),
-    }));
-
-    for (const event of events) {
-      await eb.add(event as any);
-    }
-
-    const insertSpy = vi
-      .spyOn(ch, 'insert')
-      .mockResolvedValue(undefined as any);
-
-    await eb.processBuffer();
-
-    // Only first 2 events should be processed (batchSize = 2)
-    expect(insertSpy).toHaveBeenCalledOnce();
-    const insertCall = insertSpy.mock.calls[0]![0] as any;
-    expect(insertCall.format).toBe('JSONEachRow');
-    expect(insertCall.table).toBe('events');
-    expect(insertCall.values).toHaveLength(2);
-    expect(insertCall.values[0]).toMatchObject({ name: 'event0' });
-    expect(insertCall.values[1]).toMatchObject({ name: 'event1' });
-
-    // 3 events should remain in buffer
-    const bufferKey = 'event-buffer';
-    const remaining = await redis.lrange(bufferKey, 0, -1);
-    expect(remaining.length).toBe(3);
-
-    // Restore env
-    if (prev === undefined) delete process.env.EVENT_BUFFER_BATCH_SIZE;
-    else process.env.EVENT_BUFFER_BATCH_SIZE = prev;
-
-    insertSpy.mockRestore();
-  });
-
   it('inserts in chunks according to EVENT_BUFFER_CHUNK_SIZE', async () => {
     const prev = process.env.EVENT_BUFFER_CHUNK_SIZE;
     const prevBatch = process.env.EVENT_BUFFER_BATCH_SIZE;

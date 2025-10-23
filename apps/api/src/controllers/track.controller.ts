@@ -323,8 +323,18 @@ async function identify({
     projectId,
     properties: {
       ...(payload.properties ?? {}),
-      ...(geo ?? {}),
-      ...uaInfo,
+      country: geo.country,
+      city: geo.city,
+      region: geo.region,
+      longitude: geo.longitude,
+      latitude: geo.latitude,
+      os: uaInfo.os,
+      os_version: uaInfo.osVersion,
+      browser: uaInfo.browser,
+      browser_version: uaInfo.browserVersion,
+      device: uaInfo.device,
+      brand: uaInfo.brand,
+      model: uaInfo.model,
     },
   });
 }

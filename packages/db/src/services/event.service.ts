@@ -19,12 +19,9 @@ import type { EventMeta, Prisma } from '../prisma-client';
 import { db } from '../prisma-client';
 import { type SqlBuilderObject, createSqlBuilder } from '../sql-builder';
 import { getEventFiltersWhereClause } from './chart.service';
-import { getOrganizationByProjectIdCached } from './organization.service';
 import type { IServiceProfile, IServiceUpsertProfile } from './profile.service';
 import {
   getProfileById,
-  getProfileByIdCached,
-  getProfiles,
   getProfilesCached,
   upsertProfile,
 } from './profile.service';
@@ -898,7 +895,7 @@ class EventService {
     ]);
 
     if (event?.profileId) {
-      const profile = await getProfileByIdCached(event?.profileId, projectId);
+      const profile = await getProfileById(event?.profileId, projectId);
       if (profile) {
         event.profile = profile;
       }

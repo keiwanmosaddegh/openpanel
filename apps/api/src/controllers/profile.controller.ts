@@ -17,14 +17,14 @@ export async function updateProfile(
   }>,
   reply: FastifyReply,
 ) {
-  const { profileId, properties, ...rest } = request.body;
+  const payload = request.body;
   const projectId = request.client!.projectId;
   if (!projectId) {
     return reply.status(400).send('No projectId');
   }
   const ip = getClientIp(request)!;
   const ua = request.headers['user-agent']!;
-  const uaInfo = parseUserAgent(ua, properties);
+  const uaInfo = parseUserAgent(ua, payload.properties);
   const geo = await getGeoLocation(ip);
 
   if (
@@ -40,18 +40,28 @@ export async function updateProfile(
   }
 
   await upsertProfile({
-    id: profileId,
+    ...payload,
+    id: payload.profileId,
     isExternal: true,
     projectId,
     properties: {
-      ...(properties ?? {}),
-      ...(ip ? geo : {}),
-      ...uaInfo,
+      ...(payload.properties ?? {}),
+      country: geo.country,
+      city: geo.city,
+      region: geo.region,
+      longitude: geo.longitude,
+      latitude: geo.latitude,
+      os: uaInfo.os,
+      os_version: uaInfo.osVersion,
+      browser: uaInfo.browser,
+      browser_version: uaInfo.browserVersion,
+      device: uaInfo.device,
+      brand: uaInfo.brand,
+      model: uaInfo.model,
     },
-    ...rest,
   });
 
-  reply.status(202).send(profileId);
+  reply.status(202).send(payload.profileId);
 }
 
 export async function incrementProfileProperty(

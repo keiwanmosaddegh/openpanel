@@ -134,16 +134,31 @@ export class ProfileBuffer extends BaseBuffer {
       projectId: profile.project_id,
     });
 
-    const existingProfile = await getRedisCache().get(cacheKey);
+    const existingProfile = await this.fetchFromCache(
+      profile.id,
+      profile.project_id,
+    );
     if (existingProfile) {
-      const parsedProfile = getSafeJson<IClickhouseProfile>(existingProfile);
-      if (parsedProfile) {
-        logger.debug('Profile found in Redis');
-        return parsedProfile;
-      }
+      logger.debug('Profile found in Redis');
+      return existingProfile;
     }
 
     return this.fetchFromClickhouse(profile, logger);
+  }
+
+  public async fetchFromCache(
+    profileId: string,
+    projectId: string,
+  ): Promise<IClickhouseProfile | null> {
+    const cacheKey = this.getProfileCacheKey({
+      profileId,
+      projectId,
+    });
+    const existingProfile = await getRedisCache().get(cacheKey);
+    if (!existingProfile) {
+      return null;
+    }
+    return getSafeJson<IClickhouseProfile>(existingProfile);
   }
 
   private async fetchFromClickhouse(

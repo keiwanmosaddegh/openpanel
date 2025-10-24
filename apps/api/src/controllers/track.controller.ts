@@ -1,8 +1,7 @@
 import { getClientIp } from '@/utils/get-client-ip';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { path, assocPath, pathOr, pick } from 'ramda';
+import { assocPath, pathOr, pick } from 'ramda';
 
-import { checkDuplicatedEvent } from '@/utils/deduplicate';
 import { generateId } from '@openpanel/common';
 import { generateDeviceId, parseUserAgent } from '@openpanel/common/server';
 import { getProfileById, getSalts, upsertProfile } from '@openpanel/db';
@@ -99,12 +98,11 @@ export async function handler(
   const projectId = request.client?.projectId;
 
   if (!projectId) {
-    reply.status(400).send({
+    return reply.status(400).send({
       status: 400,
       error: 'Bad Request',
       message: 'Missing projectId',
     });
-    return;
   }
 
   const identity = getIdentity(request.body);
@@ -136,33 +134,7 @@ export async function handler(
           })
         : '';
 
-      if (
-        await checkDuplicatedEvent({
-          reply,
-          payload: {
-            ...request.body,
-            timestamp,
-            previousDeviceId,
-            currentDeviceId,
-          },
-          projectId,
-        })
-      ) {
-        return;
-      }
-
-      const promises = [
-        track({
-          payload: request.body.payload,
-          currentDeviceId,
-          previousDeviceId,
-          projectId,
-          geo,
-          headers: getStringHeaders(request.headers),
-          timestamp: timestamp.timestamp,
-          isTimestampFromThePast: timestamp.isTimestampFromThePast,
-        }),
-      ];
+      const promises = [];
 
       // If we have more than one property in the identity object, we should identify the user
       // Otherwise its only a profileId and we should not identify the user
@@ -177,23 +149,23 @@ export async function handler(
         );
       }
 
+      promises.push(
+        track({
+          payload: request.body.payload,
+          currentDeviceId,
+          previousDeviceId,
+          projectId,
+          geo,
+          headers: getStringHeaders(request.headers),
+          timestamp: timestamp.timestamp,
+          isTimestampFromThePast: timestamp.isTimestampFromThePast,
+        }),
+      );
+
       await Promise.all(promises);
       break;
     }
     case 'identify': {
-      if (
-        await checkDuplicatedEvent({
-          reply,
-          payload: {
-            ...request.body,
-            timestamp,
-          },
-          projectId,
-        })
-      ) {
-        return;
-      }
-
       const geo = await getGeoLocation(ip);
       await identify({
         payload: request.body.payload,
@@ -204,27 +176,13 @@ export async function handler(
       break;
     }
     case 'alias': {
-      reply.status(400).send({
+      return reply.status(400).send({
         status: 400,
         error: 'Bad Request',
         message: 'Alias is not supported',
       });
-      break;
     }
     case 'increment': {
-      if (
-        await checkDuplicatedEvent({
-          reply,
-          payload: {
-            ...request.body,
-            timestamp,
-          },
-          projectId,
-        })
-      ) {
-        return;
-      }
-
       await increment({
         payload: request.body.payload,
         projectId,
@@ -232,19 +190,6 @@ export async function handler(
       break;
     }
     case 'decrement': {
-      if (
-        await checkDuplicatedEvent({
-          reply,
-          payload: {
-            ...request.body,
-            timestamp,
-          },
-          projectId,
-        })
-      ) {
-        return;
-      }
-
       await decrement({
         payload: request.body.payload,
         projectId,
@@ -252,12 +197,11 @@ export async function handler(
       break;
     }
     default: {
-      reply.status(400).send({
+      return reply.status(400).send({
         status: 400,
         error: 'Bad Request',
         message: 'Invalid type',
       });
-      break;
     }
   }
 

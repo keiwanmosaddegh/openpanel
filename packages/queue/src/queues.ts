@@ -17,9 +17,30 @@ export interface EventsQueuePayloadIncomingEvent {
   payload: {
     projectId: string;
     event: TrackPayload & {
-      timestamp: string;
+      timestamp: string | number;
       isTimestampFromThePast: boolean;
     };
+    uaInfo:
+      | {
+          readonly isServer: true;
+          readonly device: 'server';
+          readonly os: '';
+          readonly osVersion: '';
+          readonly browser: '';
+          readonly browserVersion: '';
+          readonly brand: '';
+          readonly model: '';
+        }
+      | {
+          readonly os: string | undefined;
+          readonly osVersion: string | undefined;
+          readonly browser: string | undefined;
+          readonly browserVersion: string | undefined;
+          readonly device: string;
+          readonly brand: string | undefined;
+          readonly model: string | undefined;
+          readonly isServer: false;
+        };
     geo: {
       country: string | undefined;
       city: string | undefined;

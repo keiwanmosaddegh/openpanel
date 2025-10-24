@@ -76,6 +76,7 @@ export async function postEvent(
         timestamp,
         isTimestampFromThePast,
       },
+      uaInfo,
       geo,
       currentDeviceId,
       previousDeviceId,

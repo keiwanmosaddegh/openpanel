@@ -38,10 +38,10 @@ export function getStringHeaders(headers: FastifyRequest['headers']) {
 }
 
 function getIdentity(body: TrackHandlerPayload): IdentifyPayload | undefined {
-  const identity = path<IdentifyPayload>(
-    ['properties', '__identify'],
-    body.payload,
-  );
+  const identity =
+    'properties' in body.payload
+      ? (body.payload?.properties?.__identify as IdentifyPayload | undefined)
+      : undefined;
 
   return (
     identity ||
@@ -57,27 +57,28 @@ export function getTimestamp(
   timestamp: FastifyRequest['timestamp'],
   payload: TrackHandlerPayload['payload'],
 ) {
-  const safeTimestamp = new Date(timestamp || Date.now()).toISOString();
-  const userDefinedTimestamp = path<string>(
-    ['properties', '__timestamp'],
-    payload,
-  );
+  const safeTimestamp = timestamp || Date.now();
+  const userDefinedTimestamp =
+    'properties' in payload
+      ? (payload?.properties?.__timestamp as string | undefined)
+      : undefined;
 
   if (!userDefinedTimestamp) {
     return { timestamp: safeTimestamp, isTimestampFromThePast: false };
   }
 
   const clientTimestamp = new Date(userDefinedTimestamp);
+  const clientTimestampNumber = clientTimestamp.getTime();
 
   if (
-    Number.isNaN(clientTimestamp.getTime()) ||
-    clientTimestamp > new Date(safeTimestamp)
+    Number.isNaN(clientTimestampNumber) ||
+    clientTimestampNumber > safeTimestamp
   ) {
     return { timestamp: safeTimestamp, isTimestampFromThePast: false };
   }
 
   return {
-    timestamp: clientTimestamp.toISOString(),
+    timestamp: clientTimestampNumber,
     isTimestampFromThePast: true,
   };
 }
@@ -90,8 +91,10 @@ export async function handler(
 ) {
   const timestamp = getTimestamp(request.timestamp, request.body.payload);
   const ip =
-    path<string>(['properties', '__ip'], request.body.payload) ||
-    getClientIp(request)!;
+    'properties' in request.body.payload &&
+    request.body.payload.properties?.__ip
+      ? (request.body.payload.properties.__ip as string)
+      : getClientIp(request)!;
   const ua = request.headers['user-agent']!;
   const projectId = request.client?.projectId;
 
@@ -277,7 +280,7 @@ async function track({
   projectId: string;
   geo: GeoLocation;
   headers: Record<string, string | undefined>;
-  timestamp: string;
+  timestamp: number;
   isTimestampFromThePast: boolean;
 }) {
   const uaInfo = parseUserAgent(headers['user-agent'], payload.properties);
@@ -287,7 +290,7 @@ async function track({
       : `${projectId}:${generateId()}`
     : currentDeviceId;
   await eventsGroupQueue.add({
-    orderMs: new Date(timestamp).getTime(),
+    orderMs: timestamp,
     data: {
       projectId,
       headers,
@@ -296,6 +299,7 @@ async function track({
         timestamp,
         isTimestampFromThePast,
       },
+      uaInfo,
       geo,
       currentDeviceId,
       previousDeviceId,

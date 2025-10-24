@@ -2,10 +2,12 @@ import { getClientIp } from '@/utils/get-client-ip';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { assocPath, pathOr, pick } from 'ramda';
 
+import { logger } from '@/utils/logger';
 import { generateId } from '@openpanel/common';
 import { generateDeviceId, parseUserAgent } from '@openpanel/common/server';
 import { getProfileById, getSalts, upsertProfile } from '@openpanel/db';
 import { type GeoLocation, getGeoLocation } from '@openpanel/geo';
+import type { ILogger } from '@openpanel/logger';
 import { eventsGroupQueue } from '@openpanel/queue';
 import { getRedisCache } from '@openpanel/redis';
 import type {
@@ -152,6 +154,7 @@ export async function handler(
 
       promises.push(
         track({
+          log: request.log.info,
           payload: request.body.payload,
           currentDeviceId,
           previousDeviceId,
@@ -218,6 +221,7 @@ async function track({
   headers,
   timestamp,
   isTimestampFromThePast,
+  log,
 }: {
   payload: TrackPayload;
   currentDeviceId: string;
@@ -227,6 +231,7 @@ async function track({
   headers: Record<string, string | undefined>;
   timestamp: number;
   isTimestampFromThePast: boolean;
+  log: any;
 }) {
   const uaInfo = parseUserAgent(headers['user-agent'], payload.properties);
   const groupId = uaInfo.isServer
@@ -238,6 +243,24 @@ async function track({
     .filter(Boolean)
     .join('-');
   await getRedisCache().incr('track:counter');
+  log('track handler', {
+    jobId: jobId,
+    groupId: groupId,
+    timestamp: timestamp,
+    data: {
+      projectId,
+      headers,
+      event: {
+        ...payload,
+        timestamp,
+        isTimestampFromThePast,
+      },
+      uaInfo,
+      geo,
+      currentDeviceId,
+      previousDeviceId,
+    },
+  });
   await eventsGroupQueue.add({
     orderMs: timestamp,
     data: {

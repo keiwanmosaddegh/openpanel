@@ -40,12 +40,14 @@ export async function bootWorkers() {
           jobId: job.id,
           groupId: job.groupId,
           timestamp: job.data.event.timestamp,
+          data: job.data,
         });
       } else {
         logger.info('event already processed', {
           jobId: job.id,
           groupId: job.groupId,
           timestamp: job.data.event.timestamp,
+          data: job.data,
         });
       }
       await incomingEventPure(job.data);

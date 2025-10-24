@@ -143,6 +143,9 @@ export class EventBuffer extends BaseBuffer {
     try {
       const eventJson = JSON.stringify(event);
       const multi = _multi || this.redis.multi();
+      if (event.name !== 'session_start' && event.name !== 'session_end') {
+        multi.incr('event:buffer:counter');
+      }
 
       multi.rpush(this.redisKey, eventJson).incr(this.bufferCounterKey);
 
@@ -462,7 +465,10 @@ export class EventBuffer extends BaseBuffer {
             format_csv_allow_double_quotes: 1,
           },
         });
+
+        await getRedisCache().incrby('event:buffer:csv:counter', chunk.length);
       } else {
+        await getRedisCache().incrby('event:buffer:json:counter', chunk.length);
         await ch.insert({
           table: 'events',
           values: chunk,

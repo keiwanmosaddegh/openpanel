@@ -15,7 +15,7 @@ import {
 } from '@openpanel/db';
 import type { ILogger } from '@openpanel/logger';
 import type { EventsQueuePayloadIncomingEvent } from '@openpanel/queue';
-import { getLock } from '@openpanel/redis';
+import { getLock, getRedisCache } from '@openpanel/redis';
 import { DelayedError, type Job } from 'bullmq';
 import { omit } from 'ramda';
 import * as R from 'ramda';
@@ -54,6 +54,7 @@ export async function incomingEventPure(
   job?: Job<EventsQueuePayloadIncomingEvent>,
   token?: string,
 ) {
+  await getRedisCache().incr('queue:counter');
   const {
     geo,
     event: body,

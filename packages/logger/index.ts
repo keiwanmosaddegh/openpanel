@@ -9,7 +9,9 @@ const logLevel = process.env.LOG_LEVEL ?? 'info';
 const silent = process.env.LOG_SILENT === 'true';
 
 export function createLogger({ name }: { name: string }): ILogger {
-  const service = `${name}-${process.env.NODE_ENV ?? 'dev'}`;
+  const service = [process.env.LOG_PREFIX, name, process.env.NODE_ENV ?? 'dev']
+    .filter(Boolean)
+    .join('-');
 
   const prettyError = (error: Error) => ({
     ...error,

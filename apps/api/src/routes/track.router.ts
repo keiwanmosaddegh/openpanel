@@ -18,17 +18,20 @@ const trackRouter: FastifyPluginCallback = async (fastify) => {
       const [
         trackCounter,
         queueCounter,
+        eventBufferCounter,
         eventBufferCsvCounter,
         eventBufferJsonCounter,
       ] = await Promise.all([
         getRedisCache().get('track:counter'),
         getRedisCache().get('queue:counter'),
+        getRedisCache().get('event:buffer:counter'),
         getRedisCache().get('event:buffer:csv:counter'),
         getRedisCache().get('event:buffer:json:counter'),
       ]);
       return reply.send({
         track: trackCounter,
         queue: queueCounter,
+        eventBuffer: eventBufferCounter,
         eventBufferCsv: eventBufferCsvCounter,
         eventBufferJson: eventBufferJsonCounter,
       });
@@ -42,6 +45,7 @@ const trackRouter: FastifyPluginCallback = async (fastify) => {
       await Promise.all([
         getRedisCache().del('track:counter'),
         getRedisCache().del('queue:counter'),
+        getRedisCache().del('event:buffer:counter'),
         getRedisCache().del('event:buffer:csv:counter'),
         getRedisCache().del('event:buffer:json:counter'),
       ]);

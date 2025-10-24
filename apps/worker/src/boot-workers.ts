@@ -34,6 +34,9 @@ export async function bootWorkers() {
     concurrency: Number.parseInt(process.env.EVENT_JOB_CONCURRENCY || '1', 10),
     logger: queueLogger,
     queue: eventsGroupQueue,
+    blockingTimeoutSec: Number.parseFloat(
+      process.env.EVENT_BLOCKING_TIMEOUT_SEC || '1',
+    ),
     handler: async (job) => {
       if (await getLock(job.id, '1', 10000)) {
         logger.info('worker handler', {

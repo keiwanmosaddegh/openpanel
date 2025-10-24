@@ -233,6 +233,9 @@ async function track({
       ? `${projectId}:${payload.profileId}`
       : `${projectId}:${generateId()}`
     : currentDeviceId;
+  const jobId = [payload.name, timestamp, projectId, currentDeviceId, groupId]
+    .filter(Boolean)
+    .join('-');
   await eventsGroupQueue.add({
     orderMs: timestamp,
     data: {
@@ -249,6 +252,7 @@ async function track({
       previousDeviceId,
     },
     groupId,
+    jobId,
   });
 }
 

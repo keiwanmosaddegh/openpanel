@@ -50,6 +50,15 @@ export async function postEvent(
       ? `${projectId}:${request.body?.profileId}`
       : `${projectId}:${generateId()}`
     : currentDeviceId;
+  const jobId = [
+    request.body.name,
+    timestamp,
+    projectId,
+    currentDeviceId,
+    groupId,
+  ]
+    .filter(Boolean)
+    .join('-');
   await eventsGroupQueue.add({
     orderMs: new Date(timestamp).getTime(),
     data: {
@@ -66,6 +75,7 @@ export async function postEvent(
       previousDeviceId,
     },
     groupId,
+    jobId,
   });
 
   reply.status(202).send('ok');

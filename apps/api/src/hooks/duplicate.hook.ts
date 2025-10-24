@@ -1,4 +1,3 @@
-import { SdkAuthError, validateSdkRequest } from '@/utils/auth';
 import { isDuplicatedEvent } from '@/utils/deduplicate';
 import type { PostEventPayload, TrackHandlerPayload } from '@openpanel/sdk';
 import type { FastifyReply, FastifyRequest } from 'fastify';

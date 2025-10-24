@@ -153,8 +153,8 @@ importers:
         specifier: ^5.0.0
         version: 5.0.0
       groupmq:
-        specifier: 1.0.0
-        version: 1.0.0(ioredis@5.8.2)
+        specifier: 1.0.1-next.1
+        version: 1.0.1-next.1(ioredis@5.8.2)
       jsonwebtoken:
         specifier: ^9.0.2
         version: 9.0.2
@@ -831,8 +831,8 @@ importers:
         specifier: ^4.18.2
         version: 4.18.2
       groupmq:
-        specifier: 1.0.0-next.19
-        version: 1.0.0-next.19(ioredis@5.8.2)
+        specifier: 1.0.1-next.1
+        version: 1.0.1-next.1(ioredis@5.8.2)
       prom-client:
         specifier: ^15.1.3
         version: 15.1.3
@@ -1298,8 +1298,8 @@ importers:
         specifier: ^5.8.7
         version: 5.8.7
       groupmq:
-        specifier: 1.0.0-next.19
-        version: 1.0.0-next.19(ioredis@5.8.2)
+        specifier: 1.0.1-next.1
+        version: 1.0.1-next.1(ioredis@5.8.2)
     devDependencies:
       '@openpanel/sdk':
         specifier: workspace:*
@@ -11258,14 +11258,8 @@ packages:
     resolution: {integrity: sha512-5v6yZd4JK3eMI3FqqCouswVqwugaA9r4dNZB1wwcmrD02QkV5H0y7XBQW8QwQqEaZY1pM9aqORSORhJRdNK44Q==}
     engines: {node: '>=6.0'}
 
-  groupmq@1.0.0:
-    resolution: {integrity: sha512-1UWQdJcmwlRAwKlhJvkAZzPoAuMKgOrSZeZRAZQzMuSTmmW6an6QfGiSWVmB0UQ3itgT2SVI9bYj3O3C+p/BzA==}
-    engines: {node: '>=18'}
-    peerDependencies:
-      ioredis: '>=5'
-
-  groupmq@1.0.0-next.19:
-    resolution: {integrity: sha512-2iF80iNtvQ/yl8b46JRfNQIkrR+k4VaVtlg+lliPn+fn5IRMEeFaS1cFbGPxYjMtkPvMsi0G526pj1OAYefsFg==}
+  groupmq@1.0.1-next.1:
+    resolution: {integrity: sha512-332yhgIx/zwcSS9+CeHZ4FbwSv1LfOsE2jcexGhEvUXIO6TxfEUZIxWzI1CXETVim4kg8dG8LXdRZGUYLrAETw==}
     engines: {node: '>=18'}
     peerDependencies:
       ioredis: '>=5'
@@ -27587,12 +27581,7 @@ snapshots:
       section-matter: 1.0.0
       strip-bom-string: 1.0.0
 
-  groupmq@1.0.0(ioredis@5.8.2):
-    dependencies:
-      cron-parser: 4.9.0
-      ioredis: 5.8.2
-
-  groupmq@1.0.0-next.19(ioredis@5.8.2):
+  groupmq@1.0.1-next.1(ioredis@5.8.2):
     dependencies:
       cron-parser: 4.9.0
       ioredis: 5.8.2

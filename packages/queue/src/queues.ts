@@ -114,15 +114,8 @@ export type MiscQueuePayload = MiscQueuePayloadTrialEndingSoon;
 
 export type CronQueueType = CronQueuePayload['type'];
 
-const orderingWindowMs = Number.parseInt(
-  process.env.ORDERING_WINDOW_MS || '50',
-  10,
-);
-const orderingGracePeriodDecay = Number.parseFloat(
-  process.env.ORDERING_GRACE_PERIOD_DECAY || '0.9',
-);
-const orderingMaxWaitMultiplier = Number.parseInt(
-  process.env.ORDERING_MAX_WAIT_MULTIPLIER || '8',
+const orderingDelayMs = Number.parseInt(
+  process.env.ORDERING_DELAY_MS || '100',
   10,
 );
 
@@ -133,11 +126,7 @@ export const eventsGroupQueue = new GroupQueue<
   namespace: 'group_events',
   // @ts-expect-error - TODO: Fix this in groupmq
   redis: getRedisGroupQueue(),
-  orderingMethod: 'in-memory',
-  orderingWindowMs,
-  orderingGracePeriodDecay,
-  orderingMaxWaitMultiplier,
-  keepCompleted: 10,
+  keepCompleted: 1_000,
   keepFailed: 10_000,
 });
 

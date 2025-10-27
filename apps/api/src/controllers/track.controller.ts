@@ -261,7 +261,7 @@ async function track({
       previousDeviceId,
     },
   });
-  await getEventsGroupQueueShard(projectId).add({
+  await getEventsGroupQueueShard(groupId).add({
     orderMs: timestamp,
     data: {
       projectId,

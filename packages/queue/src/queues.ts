@@ -157,11 +157,11 @@ export const eventsGroupQueues = Array.from({
     }),
 );
 
-export const getEventsGroupQueueShard = (projectId: string) => {
-  const shard = pickShard(projectId);
+export const getEventsGroupQueueShard = (groupId: string) => {
+  const shard = pickShard(groupId);
   const queue = eventsGroupQueues[shard];
   if (!queue) {
-    throw new Error(`Queue not found for project ${projectId}`);
+    throw new Error(`Queue not found for group ${groupId}`);
   }
   return queue;
 };

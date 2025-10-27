@@ -59,7 +59,7 @@ export async function postEvent(
   ]
     .filter(Boolean)
     .join('-');
-  await getEventsGroupQueueShard(projectId).add({
+  await getEventsGroupQueueShard(groupId).add({
     orderMs: new Date(timestamp).getTime(),
     data: {
       projectId,

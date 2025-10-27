@@ -119,6 +119,12 @@ const orderingDelayMs = Number.parseInt(
   10,
 );
 
+const autoBatchMaxWaitMs = Number.parseInt(
+  process.env.AUTO_BATCH_MAX_WAIT_MS || '0',
+  10,
+);
+const autoBatchSize = Number.parseInt(process.env.AUTO_BATCH_SIZE || '0', 10);
+
 export const eventsGroupQueue = new GroupQueue<
   EventsQueuePayloadIncomingEvent['payload']
 >({
@@ -129,6 +135,13 @@ export const eventsGroupQueue = new GroupQueue<
   keepCompleted: 1_000,
   keepFailed: 10_000,
   orderingDelayMs: orderingDelayMs,
+  autoBatch:
+    autoBatchMaxWaitMs && autoBatchSize
+      ? {
+          maxWaitMs: autoBatchMaxWaitMs,
+          size: autoBatchSize,
+        }
+      : undefined,
 });
 
 export const sessionsQueue = new Queue<SessionsQueuePayload>('sessions', {

@@ -128,6 +128,7 @@ export const eventsGroupQueue = new GroupQueue<
   redis: getRedisGroupQueue(),
   keepCompleted: 1_000,
   keepFailed: 10_000,
+  orderingDelayMs: orderingDelayMs,
 });
 
 export const sessionsQueue = new Queue<SessionsQueuePayload>('sessions', {

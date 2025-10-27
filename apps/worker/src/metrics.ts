@@ -6,13 +6,13 @@ import {
   profileBuffer,
   sessionBuffer,
 } from '@openpanel/db';
-import { cronQueue, eventsGroupQueue, sessionsQueue } from '@openpanel/queue';
+import { cronQueue, eventsGroupQueues, sessionsQueue } from '@openpanel/queue';
 
 const Registry = client.Registry;
 
 export const register = new Registry();
 
-const queues = [sessionsQueue, cronQueue, eventsGroupQueue];
+const queues = [sessionsQueue, cronQueue, ...eventsGroupQueues];
 
 register.registerMetric(
   new client.Gauge({
@@ -39,7 +39,7 @@ register.registerMetric(
 queues.forEach((queue) => {
   register.registerMetric(
     new client.Gauge({
-      name: `${queue.name}_active_count`,
+      name: `${queue.name.replace(/[\{\}]/g, '')}_active_count`,
       help: 'Active count',
       async collect() {
         const metric = await queue.getActiveCount();
@@ -50,7 +50,7 @@ queues.forEach((queue) => {
 
   register.registerMetric(
     new client.Gauge({
-      name: `${queue.name}_delayed_count`,
+      name: `${queue.name.replace(/[\{\}]/g, '')}_delayed_count`,
       help: 'Delayed count',
       async collect() {
         const metric = await queue.getDelayedCount();
@@ -61,7 +61,7 @@ queues.forEach((queue) => {
 
   register.registerMetric(
     new client.Gauge({
-      name: `${queue.name}_failed_count`,
+      name: `${queue.name.replace(/[\{\}]/g, '')}_failed_count`,
       help: 'Failed count',
       async collect() {
         const metric = await queue.getFailedCount();
@@ -72,7 +72,7 @@ queues.forEach((queue) => {
 
   register.registerMetric(
     new client.Gauge({
-      name: `${queue.name}_completed_count`,
+      name: `${queue.name.replace(/[\{\}]/g, '')}_completed_count`,
       help: 'Completed count',
       async collect() {
         const metric = await queue.getCompletedCount();
@@ -83,7 +83,7 @@ queues.forEach((queue) => {
 
   register.registerMetric(
     new client.Gauge({
-      name: `${queue.name}_waiting_count`,
+      name: `${queue.name.replace(/[\{\}]/g, '')}_waiting_count`,
       help: 'Waiting count',
       async collect() {
         const metric = await queue.getWaitingCount();

@@ -4,7 +4,7 @@ import { Worker } from 'bullmq';
 import {
   type EventsQueuePayloadIncomingEvent,
   cronQueue,
-  eventsGroupQueue,
+  eventsGroupQueues,
   miscQueue,
   notificationQueue,
   queueLogger,
@@ -28,35 +28,42 @@ const workerOptions: WorkerOptions = {
 };
 
 export async function bootWorkers() {
-  const eventsGroupWorker = new GroupWorker<
-    EventsQueuePayloadIncomingEvent['payload']
-  >({
-    concurrency: Number.parseInt(process.env.EVENT_JOB_CONCURRENCY || '1', 10),
-    logger: queueLogger,
-    queue: eventsGroupQueue,
-    blockingTimeoutSec: Number.parseFloat(
-      process.env.EVENT_BLOCKING_TIMEOUT_SEC || '1',
-    ),
-    handler: async (job) => {
-      if (await getLock(job.id, '1', 10000)) {
-        logger.info('worker handler', {
-          jobId: job.id,
-          groupId: job.groupId,
-          timestamp: job.data.event.timestamp,
-          data: job.data,
-        });
-      } else {
-        logger.info('event already processed', {
-          jobId: job.id,
-          groupId: job.groupId,
-          timestamp: job.data.event.timestamp,
-          data: job.data,
-        });
-      }
-      await incomingEventPure(job.data);
-    },
+  const eventsGroupWorkers = eventsGroupQueues.map((queue) => {
+    return new GroupWorker<EventsQueuePayloadIncomingEvent['payload']>({
+      queue,
+      concurrency: Number.parseInt(
+        process.env.EVENT_JOB_CONCURRENCY || '1',
+        10,
+      ),
+      logger: queueLogger,
+      blockingTimeoutSec: Number.parseFloat(
+        process.env.EVENT_BLOCKING_TIMEOUT_SEC || '1',
+      ),
+      handler: async (job) => {
+        if (await getLock(job.id, '1', 10000)) {
+          logger.info('worker handler', {
+            jobId: job.id,
+            groupId: job.groupId,
+            timestamp: job.data.event.timestamp,
+            data: job.data,
+          });
+        } else {
+          logger.info('event already processed', {
+            jobId: job.id,
+            groupId: job.groupId,
+            timestamp: job.data.event.timestamp,
+            data: job.data,
+          });
+        }
+        await incomingEventPure(job.data);
+      },
+    });
   });
-  eventsGroupWorker.run();
+
+  for (const worker of eventsGroupWorkers) {
+    worker.run();
+  }
+
   const sessionsWorker = new Worker(
     sessionsQueue.name,
     sessionsJob,
@@ -75,7 +82,7 @@ export async function bootWorkers() {
     cronWorker,
     notificationWorker,
     miscWorker,
-    eventsGroupWorker,
+    ...eventsGroupWorkers,
   ];
 
   workers.forEach((worker) => {

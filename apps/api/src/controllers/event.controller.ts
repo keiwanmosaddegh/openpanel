@@ -3,7 +3,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 
 import { generateDeviceId, parseUserAgent } from '@openpanel/common/server';
 import { getSalts } from '@openpanel/db';
-import { eventsGroupQueue } from '@openpanel/queue';
+import { getEventsGroupQueueShard } from '@openpanel/queue';
 import type { PostEventPayload } from '@openpanel/sdk';
 
 import { generateId } from '@openpanel/common';
@@ -59,7 +59,7 @@ export async function postEvent(
   ]
     .filter(Boolean)
     .join('-');
-  await eventsGroupQueue.add({
+  await getEventsGroupQueueShard(projectId).add({
     orderMs: new Date(timestamp).getTime(),
     data: {
       projectId,

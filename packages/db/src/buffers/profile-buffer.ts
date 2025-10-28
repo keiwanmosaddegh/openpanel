@@ -117,7 +117,6 @@ export class ProfileBuffer extends BaseBuffer {
         batchSize: this.batchSize,
       });
       if (bufferLength >= this.batchSize) {
-        this.logger.info('Buffer full, initiating flush');
         await this.tryFlush();
       }
     } catch (error) {
@@ -188,7 +187,7 @@ export class ProfileBuffer extends BaseBuffer {
 
   async processBuffer() {
     try {
-      this.logger.info('Starting profile buffer processing');
+      this.logger.debug('Starting profile buffer processing');
       const profiles = await this.redis.lrange(
         this.redisKey,
         0,
@@ -200,7 +199,7 @@ export class ProfileBuffer extends BaseBuffer {
         return;
       }
 
-      this.logger.info(`Processing ${profiles.length} profiles in buffer`);
+      this.logger.debug(`Processing ${profiles.length} profiles in buffer`);
       const parsedProfiles = profiles.map((p) =>
         getSafeJson<IClickhouseProfile>(p),
       );
@@ -220,7 +219,7 @@ export class ProfileBuffer extends BaseBuffer {
         .decrby(this.bufferCounterKey, profiles.length)
         .exec();
 
-      this.logger.info('Successfully completed profile processing', {
+      this.logger.debug('Successfully completed profile processing', {
         totalProfiles: profiles.length,
       });
     } catch (error) {

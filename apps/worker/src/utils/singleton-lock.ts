@@ -27,7 +27,7 @@ export async function requireSingleton(
     process.exit(0);
   }
 
-  logger.info('Acquired singleton lock', { key, ttlMs, lockValue });
+  logger.debug('Acquired singleton lock', { key, ttlMs, lockValue });
 
   // Set up automatic extension to keep the lock alive
   const extensionInterval = setInterval(async () => {
@@ -60,7 +60,7 @@ export async function requireSingleton(
     getRedisCache()
       .del(lockKey)
       .then(() => {
-        logger.info('Released singleton lock', { key });
+        logger.debug('Released singleton lock', { key });
       })
       .catch((error: unknown) => {
         logger.error('Failed to release singleton lock', { key, error });

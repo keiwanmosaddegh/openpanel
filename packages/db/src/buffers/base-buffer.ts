@@ -98,9 +98,9 @@ export class BaseBuffer {
     // Parallel mode: No locking, multiple workers can process simultaneously
     if (this.enableParallelProcessing) {
       try {
-        this.logger.info('Processing buffer (parallel mode)...');
+        this.logger.debug('Processing buffer (parallel mode)...');
         await this.onFlush();
-        this.logger.info('Flush completed (parallel mode)', {
+        this.logger.debug('Flush completed (parallel mode)', {
           elapsed: performance.now() - now,
         });
       } catch (error) {
@@ -124,7 +124,7 @@ export class BaseBuffer {
     );
     if (acquired === 'OK') {
       try {
-        this.logger.info('Acquired lock. Processing buffer...', {
+        this.logger.debug('Acquired lock. Processing buffer...', {
           lockId,
         });
         await this.onFlush();
@@ -140,7 +140,7 @@ export class BaseBuffer {
         }
       } finally {
         await this.releaseLock(lockId);
-        this.logger.info('Flush completed', {
+        this.logger.debug('Flush completed', {
           elapsed: performance.now() - now,
           lockId,
         });

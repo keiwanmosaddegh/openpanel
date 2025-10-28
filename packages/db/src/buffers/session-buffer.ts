@@ -228,7 +228,7 @@ export class SessionBuffer extends BaseBuffer {
         .decrby(this.bufferCounterKey, events.length);
       await multi.exec();
 
-      this.logger.info('Processed sessions', {
+      this.logger.debug('Processed sessions', {
         count: events.length,
       });
     } catch (error) {

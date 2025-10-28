@@ -324,7 +324,7 @@ export class EventBuffer extends BaseBuffer {
       });
     }
     if (retryEvents > 0) {
-      this.logger.info(`Pushed ${retryEvents} events to retry buffer`, {
+      this.logger.warn(`Pushed ${retryEvents} events to retry buffer`, {
         retryCount: retryCount + 1,
       });
     }
@@ -345,7 +345,7 @@ export class EventBuffer extends BaseBuffer {
     try {
       await this.processEventsChunk(events);
 
-      this.logger.info('Processed events from Redis buffer', {
+      this.logger.debug('Processed events from Redis buffer', {
         count: events.length,
       });
     } catch (error) {
@@ -398,7 +398,7 @@ export class EventBuffer extends BaseBuffer {
       const events = parsedItems.map((item) => item.event);
       const maxRetryCount = Math.max(...parsedItems.map((i) => i.retryCount));
 
-      this.logger.info('Processing retry buffer', {
+      this.logger.debug('Processing retry buffer', {
         count: events.length,
         maxRetryCount,
       });
@@ -406,7 +406,7 @@ export class EventBuffer extends BaseBuffer {
       try {
         await this.processEventsChunk(events);
 
-        this.logger.info('Successfully processed retry events', {
+        this.logger.debug('Successfully processed retry events', {
           count: events.length,
         });
       } catch (error) {

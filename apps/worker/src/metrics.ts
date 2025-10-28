@@ -14,6 +14,17 @@ export const register = new Registry();
 
 const queues = [sessionsQueue, cronQueue, ...eventsGroupQueues];
 
+// Histogram to track job processing time for eventsGroupQueues
+export const eventsGroupJobDuration = new client.Histogram({
+  name: 'events_group_job_duration_ms',
+  help: 'Duration of job processing in eventsGroupQueues (in ms)',
+  labelNames: ['queue_shard', 'status'],
+  buckets: [10, 25, 50, 100, 250, 500, 750, 1000, 2000, 5000, 10000, 30000], // 10ms to 30s
+  registers: [register],
+});
+
+register.registerMetric(eventsGroupJobDuration);
+
 register.registerMetric(
   new client.Gauge({
     name: `buffer_${eventBuffer.name}_retry_count`,

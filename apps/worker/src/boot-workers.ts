@@ -22,6 +22,7 @@ import { incomingEventPure } from './jobs/events.incoming-event';
 import { miscJob } from './jobs/misc';
 import { notificationJob } from './jobs/notification';
 import { sessionsJob } from './jobs/sessions';
+import { eventsGroupJobDuration } from './metrics';
 import { logger } from './utils/logger';
 import { requireSingleton } from './utils/singleton-lock';
 
@@ -226,6 +227,13 @@ export async function bootWorkers() {
 
     (worker as Worker).on('failed', (job) => {
       if (job) {
+        if (job.processedOn && job.finishedOn) {
+          const duration = job.finishedOn - job.processedOn;
+          eventsGroupJobDuration.observe(
+            { queue_shard: worker.name, status: 'failed' },
+            duration,
+          );
+        }
         logger.error('job failed', {
           jobId: job.id,
           worker: worker.name,
@@ -238,15 +246,13 @@ export async function bootWorkers() {
 
     (worker as Worker).on('completed', (job) => {
       if (job) {
-        logger.info('job completed', {
-          jobId: job.id,
-          worker: worker.name,
-          data: job.data,
-          elapsed:
-            job.processedOn && job.finishedOn
-              ? job.finishedOn - job.processedOn
-              : undefined,
-        });
+        if (job.processedOn && job.finishedOn) {
+          const duration = job.finishedOn - job.processedOn;
+          eventsGroupJobDuration.observe(
+            { queue_shard: worker.name, status: 'success' },
+            duration,
+          );
+        }
       }
     });
 

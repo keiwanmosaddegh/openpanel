@@ -11,7 +11,10 @@ import { getRedisGroupQueue, getRedisQueue } from '@openpanel/redis';
 import type { TrackPayload } from '@openpanel/sdk';
 import { Queue as GroupQueue } from 'groupmq';
 
-const EVENTS_GROUP_QUEUES_SHARDS = 3;
+export const EVENTS_GROUP_QUEUES_SHARDS = Number.parseInt(
+  process.env.EVENTS_GROUP_QUEUES_SHARDS || '3',
+  10,
+);
 
 function pickShard(projectId: string) {
   const h = createHash('sha1').update(projectId).digest(); // 20 bytes

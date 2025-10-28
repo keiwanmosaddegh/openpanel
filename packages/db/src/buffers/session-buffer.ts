@@ -12,6 +12,9 @@ export class SessionBuffer extends BaseBuffer {
   private batchSize = process.env.SESSION_BUFFER_BATCH_SIZE
     ? Number.parseInt(process.env.SESSION_BUFFER_BATCH_SIZE, 10)
     : 1000;
+  private chunkSize = process.env.SESSION_BUFFER_CHUNK_SIZE
+    ? Number.parseInt(process.env.SESSION_BUFFER_CHUNK_SIZE, 10)
+    : 1000;
 
   private readonly redisKey = 'session-buffer';
   private redis: Redis;

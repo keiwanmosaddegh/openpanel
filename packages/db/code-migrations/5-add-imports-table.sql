@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS events_imports_replicated ON CLUSTER '{cluster}' (
+CREATE TABLE IF NOT EXISTS events_imports (
   `id` UUID DEFAULT generateUUIDv4(),
   `name` LowCardinality(String),
   `sdk_name` LowCardinality(String),
@@ -32,16 +32,11 @@ CREATE TABLE IF NOT EXISTS events_imports_replicated ON CLUSTER '{cluster}' (
   `import_status` LowCardinality(String) DEFAULT 'pending',
   `imported_at_meta` DateTime DEFAULT now()
 )
-ENGINE = ReplicatedMergeTree('/clickhouse/{installation}/{cluster}/tables/{shard}/openpanel/v1/{table}', '{replica}')
+ENGINE = MergeTree()
 PARTITION BY toYYYYMM(imported_at_meta)
 ORDER BY (import_id, created_at)
 SETTINGS index_granularity = 8192;
 
 ---
 
-CREATE TABLE IF NOT EXISTS events_imports ON CLUSTER '{cluster}' AS events_imports_replicated
-ENGINE = Distributed('{cluster}', currentDatabase(), events_imports_replicated, cityHash64(import_id));
-
----
-
-ALTER TABLE events_imports_replicated ON CLUSTER '{cluster}' MODIFY TTL imported_at_meta + INTERVAL 7 DAY;
+ALTER TABLE events_imports MODIFY TTL imported_at_meta + INTERVAL 7 DAY;

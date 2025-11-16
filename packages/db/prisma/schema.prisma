@@ -59,6 +59,7 @@ model Organization {
   integrations    Integration[]
   invites         Invite[]
   timezone        String?
+  secret          String? // Bcrypt hashed secret for server-side tracking across all projects
 
   // Subscription
   subscriptionId                          String?

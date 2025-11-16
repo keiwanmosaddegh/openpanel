@@ -11,9 +11,10 @@ import {
 } from '@openpanel/db';
 import { zEditOrganization, zInviteUser } from '@openpanel/validation';
 
-import { generateSecureId } from '@openpanel/common/server';
+import { generateSecureId, hashPassword } from '@openpanel/common/server';
 import { sendEmail } from '@openpanel/email';
 import { addDays } from 'date-fns';
+import crypto from 'crypto';
 import { getOrganizationAccess } from '../access';
 import { TRPCAccessError, TRPCBadRequestError } from '../errors';
 import {
@@ -289,5 +290,64 @@ export const organizationRouter = createTRPCRouter({
         throw TRPCBadRequestError('Invite ID is required');
       }
       return getInviteById(input.inviteId);
+    }),
+
+  generateSecret: protectedProcedure
+    .input(z.object({ organizationId: z.string() }))
+    .mutation(async ({ input, ctx }) => {
+      const access = await getOrganizationAccess({
+        userId: ctx.session.userId,
+        organizationId: input.organizationId,
+      });
+
+      if (access?.role !== 'org:admin') {
+        throw TRPCAccessError('You do not have access to this organization');
+      }
+
+      const organization = await db.organization.findUnique({
+        where: { id: input.organizationId },
+        select: { secret: true },
+      });
+
+      if (organization?.secret) {
+        throw TRPCBadRequestError('Organization already has a secret. Use regenerateSecret to create a new one.');
+      }
+
+      // Generate a secure random secret
+      const secret = `sec_${crypto.randomBytes(20).toString('hex')}`;
+      const hashedSecret = await hashPassword(secret);
+
+      await db.organization.update({
+        where: { id: input.organizationId },
+        data: { secret: hashedSecret },
+      });
+
+      // Return the unhashed secret (only time it's shown)
+      return { secret };
+    }),
+
+  regenerateSecret: protectedProcedure
+    .input(z.object({ organizationId: z.string() }))
+    .mutation(async ({ input, ctx }) => {
+      const access = await getOrganizationAccess({
+        userId: ctx.session.userId,
+        organizationId: input.organizationId,
+      });
+
+      if (access?.role !== 'org:admin') {
+        throw TRPCAccessError('You do not have access to this organization');
+      }
+
+      // Generate a new secure random secret
+      const secret = `sec_${crypto.randomBytes(20).toString('hex')}`;
+      const hashedSecret = await hashPassword(secret);
+
+      await db.organization.update({
+        where: { id: input.organizationId },
+        data: { secret: hashedSecret },
+      });
+
+      // Return the unhashed secret (only time it's shown)
+      return { secret };
     }),
 });

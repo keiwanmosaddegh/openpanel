@@ -2,7 +2,7 @@ import type { FastifyRequest, RawRequestDefaultExpression } from 'fastify';
 
 import { verifyPassword } from '@openpanel/common/server';
 import type { IServiceClientWithProject } from '@openpanel/db';
-import { ClientType, getClientByIdCached } from '@openpanel/db';
+import { ClientType, getClientByIdCached, db } from '@openpanel/db';
 import { getCache } from '@openpanel/redis';
 import type { PostEventPayload, TrackHandlerPayload } from '@openpanel/sdk';
 import type {
@@ -75,18 +75,94 @@ export async function validateSdkRequest(
     throw createError('Ingestion: Clean ID must be a valid UUIDv4');
   }
 
+  // Path 1: Try to find as Client (existing behavior)
   const client = await getClientByIdCached(clientId);
 
-  if (!client) {
+  if (client) {
+    if (!client.project) {
+      throw createError('Ingestion: Client has no project');
+    }
+
+    // Filter out blocked IPs
+    const ipFilter = client.project.filters.filter(
+      (filter): filter is IProjectFilterIp => filter.type === 'ip',
+    );
+    if (ipFilter.some((filter) => filter.ip === clientIp)) {
+      throw createError('Ingestion: IP address is blocked by project filter');
+    }
+
+    // Filter out blocked profile ids
+    const profileFilter = client.project.filters.filter(
+      (filter): filter is IProjectFilterProfileId => filter.type === 'profile_id',
+    );
+    const profileId =
+      path<string | undefined>(['payload', 'profileId'], req.body) || // Track handler
+      path<string | undefined>(['profileId'], req.body); // Event handler
+
+    if (profileFilter.some((filter) => filter.profileId === profileId)) {
+      throw createError('Ingestion: Profile id is blocked by project filter');
+    }
+
+    if (client.ignoreCorsAndSecret) {
+      return client;
+    }
+
+    if (client.project.cors) {
+      const domainAllowed = client.project.cors.find((domain) => {
+        const cleanedDomain = cleanDomain(domain);
+        // support wildcard domains `*.foo.com`
+        if (cleanedDomain.includes('*')) {
+          const regex = new RegExp(
+            `${cleanedDomain.replaceAll('.', '\\.').replaceAll('*', '.+?')}`,
+          );
+
+          return regex.test(origin || '');
+        }
+
+        if (cleanedDomain === cleanDomain(origin || '')) {
+          return true;
+        }
+      });
+
+      if (domainAllowed) {
+        return client;
+      }
+
+      if (client.project.cors.includes('*') && origin) {
+        return client;
+      }
+    }
+
+    if (client.secret && clientSecret) {
+      const isVerified = await getCache(
+        `client:auth:${clientId}:${Buffer.from(clientSecret).toString('base64')}`,
+        60 * 5,
+        async () => await verifyPassword(clientSecret, client.secret!),
+        true,
+      );
+      if (isVerified) {
+        return client;
+      }
+    }
+
+    throw createError('Ingestion: Invalid cors or secret');
+  }
+
+  // Path 2: Try to find as Project (new organization secret path)
+  const project = await db.project.findUnique({
+    where: { id: clientId },
+    include: {
+      organization: true,
+    },
+  });
+
+  if (!project) {
     throw createError('Ingestion: Invalid client id');
   }
 
-  if (!client.project) {
-    throw createError('Ingestion: Client has no project');
-  }
-
   // Filter out blocked IPs
-  const ipFilter = client.project.filters.filter(
+  const projectFilters = (project.filters || []) as Array<IProjectFilterIp | IProjectFilterProfileId>;
+  const ipFilter = projectFilters.filter(
     (filter): filter is IProjectFilterIp => filter.type === 'ip',
   );
   if (ipFilter.some((filter) => filter.ip === clientIp)) {
@@ -94,7 +170,7 @@ export async function validateSdkRequest(
   }
 
   // Filter out blocked profile ids
-  const profileFilter = client.project.filters.filter(
+  const profileFilter = projectFilters.filter(
     (filter): filter is IProjectFilterProfileId => filter.type === 'profile_id',
   );
   const profileId =
@@ -105,12 +181,9 @@ export async function validateSdkRequest(
     throw createError('Ingestion: Profile id is blocked by project filter');
   }
 
-  if (client.ignoreCorsAndSecret) {
-    return client;
-  }
-
-  if (client.project.cors) {
-    const domainAllowed = client.project.cors.find((domain) => {
+  // CORS validation for browser requests (no secret)
+  if (!clientSecret && project.cors) {
+    const domainAllowed = project.cors.find((domain) => {
       const cleanedDomain = cleanDomain(domain);
       // support wildcard domains `*.foo.com`
       if (cleanedDomain.includes('*')) {
@@ -127,23 +200,61 @@ export async function validateSdkRequest(
     });
 
     if (domainAllowed) {
-      return client;
+      // Create a client-like object for the project
+      return {
+        id: project.id,
+        name: project.name,
+        organizationId: project.organizationId,
+        projectId: project.id,
+        type: ClientType.write,
+        secret: null,
+        project,
+        organization: project.organization,
+        ignoreCorsAndSecret: false,
+        createdAt: project.createdAt,
+        updatedAt: project.updatedAt,
+      } as IServiceClientWithProject;
     }
 
-    if (client.project.cors.includes('*') && origin) {
-      return client;
+    if (project.cors.includes('*') && origin) {
+      return {
+        id: project.id,
+        name: project.name,
+        organizationId: project.organizationId,
+        projectId: project.id,
+        type: ClientType.write,
+        secret: null,
+        project,
+        organization: project.organization,
+        ignoreCorsAndSecret: false,
+        createdAt: project.createdAt,
+        updatedAt: project.updatedAt,
+      } as IServiceClientWithProject;
     }
   }
 
-  if (client.secret && clientSecret) {
+  // Organization secret validation for server requests
+  if (clientSecret && project.organization.secret) {
     const isVerified = await getCache(
-      `client:auth:${clientId}:${Buffer.from(clientSecret).toString('base64')}`,
+      `org:auth:${project.organizationId}:${Buffer.from(clientSecret).toString('base64')}`,
       60 * 5,
-      async () => await verifyPassword(clientSecret, client.secret!),
+      async () => await verifyPassword(clientSecret, project.organization.secret!),
       true,
     );
     if (isVerified) {
-      return client;
+      return {
+        id: project.id,
+        name: project.name,
+        organizationId: project.organizationId,
+        projectId: project.id,
+        type: ClientType.write,
+        secret: null,
+        project,
+        organization: project.organization,
+        ignoreCorsAndSecret: false,
+        createdAt: project.createdAt,
+        updatedAt: project.updatedAt,
+      } as IServiceClientWithProject;
     }
   }
 

@@ -7,6 +7,7 @@ import { OverviewInterval } from '@/components/overview/overview-interval';
 import OverviewMetrics from '@/components/overview/overview-metrics';
 import { OverviewRange } from '@/components/overview/overview-range';
 import { OverviewShare } from '@/components/overview/overview-share';
+import OverviewDecayCurve from '@/components/overview/overview-decay-curve';
 import OverviewTopDevices from '@/components/overview/overview-top-devices';
 import OverviewTopEvents from '@/components/overview/overview-top-events';
 import OverviewTopGeo from '@/components/overview/overview-top-geo';
@@ -48,6 +49,7 @@ function ProjectDashboard() {
       </div>
       <div className="grid grid-cols-6 gap-4 p-4 pt-0">
         <OverviewMetrics projectId={projectId} />
+        <OverviewDecayCurve projectId={projectId} />
         <OverviewTopSources projectId={projectId} />
         <OverviewTopPages projectId={projectId} />
         <OverviewTopDevices projectId={projectId} />

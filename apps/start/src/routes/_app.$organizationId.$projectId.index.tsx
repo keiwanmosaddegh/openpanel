@@ -9,6 +9,7 @@ import { OverviewRange } from '@/components/overview/overview-range';
 import { OverviewShare } from '@/components/overview/overview-share';
 import OverviewDecayCurve from '@/components/overview/overview-decay-curve';
 import OverviewHealthMonitor from '@/components/overview/overview-health-monitor';
+import OverviewMilestoneKPI from '@/components/overview/overview-milestone-kpi';
 import OverviewTopDevices from '@/components/overview/overview-top-devices';
 import OverviewTopEvents from '@/components/overview/overview-top-events';
 import OverviewTopGeo from '@/components/overview/overview-top-geo';
@@ -52,6 +53,7 @@ function ProjectDashboard() {
         <OverviewMetrics projectId={projectId} />
         <OverviewDecayCurve projectId={projectId} />
         <OverviewHealthMonitor projectId={projectId} />
+        <OverviewMilestoneKPI projectId={projectId} />
         <OverviewTopSources projectId={projectId} />
         <OverviewTopPages projectId={projectId} />
         <OverviewTopDevices projectId={projectId} />

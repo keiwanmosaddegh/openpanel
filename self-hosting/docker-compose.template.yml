@@ -89,7 +89,7 @@ services:
         max-file: "3"
 
   op-api:
-    image: lindesvard/openpanel-api:latest
+    image: keiwanmosaddegh/openpanel-api:latest
     restart: always
     command: >
       sh -c "
@@ -99,7 +99,7 @@ services:
         pnpm start
       "
     healthcheck:
-      test: [ 'CMD-SHELL', 'curl -f http://localhost:3000/healthcheck || exit 1' ]
+      test: [ 'CMD-SHELL', 'curl http://localhost:3000/healthcheck || exit 1' ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -110,6 +110,8 @@ services:
         condition: service_healthy
       op-kv:
         condition: service_healthy
+    environment:
+      - SELF_HOSTED=true
     env_file:
       - .env
     logging:
@@ -119,7 +121,7 @@ services:
         max-file: "3"
 
   op-dashboard:
-    image: lindesvard/openpanel-dashboard:latest
+    image: keiwanmosaddegh/openpanel-start:latest
     restart: always
     depends_on:
       op-api:
@@ -138,11 +140,13 @@ services:
         max-file: "3"
 
   op-worker:
-    image: lindesvard/openpanel-worker:latest
+    image: keiwanmosaddegh/openpanel-worker:latest
     restart: always
     depends_on:
       op-api:
         condition: service_healthy
+    environment:
+      - SELF_HOSTED=true
     env_file:
       - .env
     healthcheck:

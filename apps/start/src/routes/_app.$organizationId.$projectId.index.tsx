@@ -2,6 +2,7 @@ import {
   OverviewFilterButton,
   OverviewFiltersButtons,
 } from '@/components/overview/filters/overview-filters-buttons';
+import { OverviewGameFilter } from '@/components/overview/filters/overview-game-filter';
 import { LiveCounter } from '@/components/overview/live-counter';
 import { OverviewInterval } from '@/components/overview/overview-interval';
 import OverviewMetrics from '@/components/overview/overview-metrics';
@@ -39,6 +40,7 @@ function ProjectDashboard() {
           <div className="flex gap-2">
             <OverviewRange />
             <OverviewInterval />
+            <OverviewGameFilter projectId={projectId} />
             <OverviewFilterButton mode="events" />
           </div>
           <div className="flex gap-2">

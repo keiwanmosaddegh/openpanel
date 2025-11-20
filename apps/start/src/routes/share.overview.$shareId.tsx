@@ -9,7 +9,6 @@ import OverviewTopDevices from '@/components/overview/overview-top-devices';
 import OverviewTopEvents from '@/components/overview/overview-top-events';
 import OverviewTopGeo from '@/components/overview/overview-top-geo';
 import OverviewTopPages from '@/components/overview/overview-top-pages';
-import OverviewTopSources from '@/components/overview/overview-top-sources';
 import { useTRPC } from '@/integrations/trpc/react';
 import { useQuery, useSuspenseQuery } from '@tanstack/react-query';
 import { createFileRoute, notFound, useSearch } from '@tanstack/react-router';
@@ -105,7 +104,6 @@ function RouteComponent() {
         <OverviewFiltersButtons />
         <div className="mx-auto grid max-w-7xl grid-cols-6 gap-4 p-4">
           <OverviewMetrics projectId={projectId} />
-          <OverviewTopSources projectId={projectId} />
           <OverviewTopPages projectId={projectId} />
           <OverviewTopDevices projectId={projectId} />
           <OverviewTopEvents projectId={projectId} />

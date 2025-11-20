@@ -17,7 +17,7 @@ export default function OverviewDecayCurve({
   const { interval, range, previous, startDate, endDate } =
     useOverviewOptions();
   const [filters] = useEventQueryFilters();
-  const chartType: IChartType = 'bar';
+  const chartType: IChartType = 'area';
 
   return (
     <>

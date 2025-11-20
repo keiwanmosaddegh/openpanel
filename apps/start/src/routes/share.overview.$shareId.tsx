@@ -1,22 +1,23 @@
 import { ShareEnterPassword } from '@/components/auth/share-enter-password';
 import { FullPageEmptyState } from '@/components/full-page-empty-state';
 import FullPageLoadingState from '@/components/full-page-loading-state';
-import { OverviewFiltersButtons } from '@/components/overview/filters/overview-filters-buttons';
 import { LiveCounter } from '@/components/overview/live-counter';
-import OverviewMetrics from '@/components/overview/overview-metrics';
-import { OverviewRange } from '@/components/overview/overview-range';
-import OverviewTopDevices from '@/components/overview/overview-top-devices';
-import OverviewTopEvents from '@/components/overview/overview-top-events';
-import OverviewTopGeo from '@/components/overview/overview-top-geo';
-import OverviewTopPages from '@/components/overview/overview-top-pages';
+import { OverviewControls } from '@/components/overview/overview-controls';
+import { OverviewGrid } from '@/components/overview/overview-grid';
 import { useTRPC } from '@/integrations/trpc/react';
-import { useQuery, useSuspenseQuery } from '@tanstack/react-query';
+import { useSuspenseQuery } from '@tanstack/react-query';
 import { createFileRoute, notFound, useSearch } from '@tanstack/react-router';
-import { EyeClosedIcon, FrownIcon } from 'lucide-react';
 import { z } from 'zod';
 
 const shareSearchSchema = z.object({
   header: z.optional(z.number().or(z.string().or(z.boolean()))),
+  range: z.optional(z.string()),
+  start: z.optional(z.string()),
+  end: z.optional(z.string()),
+  overrideInterval: z.optional(z.string()),
+  metric: z.optional(z.number()),
+  f: z.optional(z.string()),
+  events: z.optional(z.array(z.string())),
 });
 
 export const Route = createFileRoute('/share/overview/$shareId')({
@@ -92,23 +93,12 @@ function RouteComponent() {
           </a>
         </div>
       )}
-      <div className="">
-        <div className="mx-auto max-w-7xl justify-between row gap-4 p-4 pb-0">
-          <div className="flex gap-2">
-            <OverviewRange />
-          </div>
-          <div className="flex gap-2">
-            <LiveCounter projectId={projectId} />
-          </div>
-        </div>
-        <OverviewFiltersButtons />
-        <div className="mx-auto grid max-w-7xl grid-cols-6 gap-4 p-4">
-          <OverviewMetrics projectId={projectId} />
-          <OverviewTopPages projectId={projectId} />
-          <OverviewTopDevices projectId={projectId} />
-          <OverviewTopEvents projectId={projectId} />
-          <OverviewTopGeo projectId={projectId} />
-        </div>
+      <div className="mx-auto max-w-7xl">
+        <OverviewControls
+          projectId={projectId}
+          rightContent={<LiveCounter projectId={projectId} />}
+        />
+        <OverviewGrid projectId={projectId} />
       </div>
     </div>
   );

@@ -37,7 +37,7 @@ docker buildx create --name multi-arch-builder --use || true
 # Function to build a multi-architecture image
 build_image() {
     local app=$1
-    local image_name="lindesvard/openpanel-$app"
+    local image_name="keiwanmosaddegh/openpanel-$app"
     local full_version="$image_name:$VERSION"
 
     if [ -n "$PRERELEASE" ]; then

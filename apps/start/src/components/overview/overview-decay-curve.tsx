@@ -23,7 +23,7 @@ export default function OverviewDecayCurve({
     <>
       <Widget className="col-span-6 md:col-span-3">
         <WidgetHead>
-          <div className="title">Decay Curve</div>
+          <div className="title">Retention</div>
         </WidgetHead>
         <WidgetBody className="p-3">
           <ReportChart
@@ -50,7 +50,7 @@ export default function OverviewDecayCurve({
               chartType,
               lineType: 'monotone',
               interval: interval,
-              name: 'Decay Curve',
+              name: 'Retention',
               range: range,
               previous: false,
               metric: 'sum',

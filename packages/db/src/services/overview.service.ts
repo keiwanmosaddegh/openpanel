@@ -73,6 +73,8 @@ export const zGetTopGenericInput = z.object({
     'browser_version',
     'os',
     'os_version',
+    // Custom Properties
+    'properties.game_id',
   ]),
   cursor: z.number().optional(),
   limit: z.number().optional(),
@@ -535,6 +537,73 @@ export class OverviewService {
     limit = 10,
     timezone,
   }: IGetTopGenericInput) {
+    // Handle properties columns (event-based) differently from session columns
+    if (column.startsWith('properties.')) {
+      const propertyKey = column.replace('properties.', '');
+      const offset = (cursor - 1) * limit;
+
+      // Query event stats (similar to getTopPages)
+      const eventStatsQuery = clix(this.client, timezone)
+        .select([
+          `nullIf(properties['${propertyKey}'], '') as name`,
+          'uniq(session_id) as count',
+          'round(avg(duration)/1000, 2) as avg_duration',
+        ])
+        .from(TABLE_NAMES.events, false)
+        .where('project_id', '=', projectId)
+        .where('created_at', 'BETWEEN', [
+          clix.datetime(startDate, 'toDateTime'),
+          clix.datetime(endDate, 'toDateTime'),
+        ])
+        .rawWhere(this.getRawWhereClause('events', filters))
+        .groupBy(['name'])
+        .having('name', '!=', '')
+        .orderBy('count', 'DESC')
+        .limit(limit)
+        .offset(offset);
+
+      // Query bounce stats from sessions
+      const bounceStatsQuery = clix(this.client, timezone)
+        .select([
+          'id',
+          'coalesce(is_bounce, 0) as is_bounce',
+          'sign',
+        ])
+        .from(TABLE_NAMES.sessions, true)
+        .where('sign', '=', 1)
+        .where('project_id', '=', projectId)
+        .where('created_at', 'BETWEEN', [
+          clix.datetime(startDate, 'toDateTime'),
+          clix.datetime(endDate, 'toDateTime'),
+        ])
+        .rawWhere(this.getRawWhereClause('sessions', filters));
+
+      const mainQuery = clix(this.client, timezone)
+        .with('event_stats', eventStatsQuery)
+        .with('bounce_stats', bounceStatsQuery)
+        .select<{
+          name: string;
+          sessions: number;
+          bounce_rate: number;
+          avg_session_duration: number;
+        }>([
+          'e.name',
+          'e.count as sessions',
+          'e.avg_duration as avg_session_duration',
+          'round(countIf(b.is_bounce = 1) * 100.0 / count(b.id), 2) as bounce_rate',
+        ])
+        .from('event_stats e', false)
+        .leftJoin(
+          'bounce_stats b',
+          `b.id IN (SELECT session_id FROM ${TABLE_NAMES.events} WHERE project_id = '${projectId}' AND properties['${propertyKey}'] = e.name)`,
+        )
+        .groupBy(['e.name', 'e.count', 'e.avg_duration'])
+        .orderBy('sessions', 'DESC');
+
+      return mainQuery.execute();
+    }
+
+    // Original session-based logic
     const distinctSessionQuery = this.getDistinctSessions({
       projectId,
       filters,

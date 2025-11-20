@@ -22,6 +22,7 @@ export const OVERVIEW_COLUMNS_NAME: Record<
   utm_campaign: 'UTM campaign',
   utm_term: 'UTM term',
   utm_content: 'UTM content',
+  'properties.game_id': 'Game',
 };
 
 export const OVERVIEW_COLUMNS_NAME_PLURAL: Record<
@@ -46,4 +47,5 @@ export const OVERVIEW_COLUMNS_NAME_PLURAL: Record<
   utm_campaign: 'UTM campaigns',
   utm_term: 'UTM terms',
   utm_content: 'UTM contents',
+  'properties.game_id': 'Games',
 };

@@ -13,7 +13,7 @@ import OverviewMilestoneKPI from '@/components/overview/overview-milestone-kpi';
 import OverviewTopDevices from '@/components/overview/overview-top-devices';
 import OverviewTopEvents from '@/components/overview/overview-top-events';
 import OverviewTopGeo from '@/components/overview/overview-top-geo';
-import OverviewTopPages from '@/components/overview/overview-top-pages';
+import OverviewTopGames from '@/components/overview/overview-top-games';
 import { PAGE_TITLES, createProjectTitle } from '@/utils/title';
 import { createFileRoute } from '@tanstack/react-router';
 
@@ -53,7 +53,7 @@ function ProjectDashboard() {
         <OverviewDecayCurve projectId={projectId} />
         <OverviewHealthMonitor projectId={projectId} />
         <OverviewMilestoneKPI projectId={projectId} />
-        <OverviewTopPages projectId={projectId} />
+        <OverviewTopGames projectId={projectId} />
         <OverviewTopDevices projectId={projectId} />
         <OverviewTopEvents projectId={projectId} />
         <OverviewTopGeo projectId={projectId} />

@@ -1,5 +1,6 @@
 import { createPushModal } from 'pushmodal';
 
+import OverviewTopGamesModal from '@/components/overview/overview-top-games-modal';
 import OverviewTopGenericModal from '@/components/overview/overview-top-generic-modal';
 import OverviewTopPagesModal from '@/components/overview/overview-top-pages-modal';
 import { op } from '@/utils/op';
@@ -34,6 +35,7 @@ import ShareOverviewModal from './share-overview-modal';
 
 const modals = {
   OverviewTopPagesModal: OverviewTopPagesModal,
+  OverviewTopGamesModal: OverviewTopGamesModal,
   OverviewTopGenericModal: OverviewTopGenericModal,
   RequestPasswordReset: RequestPasswordReset,
   EditEvent: EditEvent,

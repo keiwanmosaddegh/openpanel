@@ -8,6 +8,7 @@ import {
   getOrganizationSubscriptionChartEndDate,
   getReferrerSpikes,
   getSettingsForProject,
+  overviewGamesService,
   overviewService,
   TABLE_NAMES,
   validateOverviewShareAccess,
@@ -730,6 +731,32 @@ export const overviewRouter = createTRPCRouter({
         false,
         timezone
       )(overviewService.getMapData.bind(overviewService));
+
+      return current;
+    }),
+
+  // Fork-only: per-game breakdown for the overview Games widget. Appended at the
+  // end of the router and backed by its own service file, so the fork's surface
+  // against upstream stays at one import plus this block.
+  gameBreakdown: overviewProcedure
+    .input(
+      z.object({
+        projectId: z.string(),
+        shareId: z.string().optional(),
+        filters: z.array(z.any()).default([]),
+        range: zRange,
+        startDate: z.string().nullish(),
+        endDate: z.string().nullish(),
+      })
+    )
+    .use(cacher)
+    .query(async ({ input }) => {
+      const { timezone } = await getSettingsForProject(input.projectId);
+      const { current } = await getCurrentAndPrevious(
+        { ...input, timezone },
+        false,
+        timezone
+      )(overviewGamesService.getGameBreakdown.bind(overviewGamesService));
 
       return current;
     }),

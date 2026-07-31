@@ -26,6 +26,8 @@ export * from './src/services/insights';
 export * from './src/services/notification.service';
 export * from './src/services/organization.service';
 export * from './src/services/overview.service';
+// fork-only: per-game breakdown behind the overview Games widget.
+export * from './src/services/overview-games.service';
 export * from './src/services/pages.service';
 export * from './src/services/profile.service';
 export * from './src/services/project.service';

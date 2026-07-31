@@ -1,6 +1,6 @@
 import OverviewRetention from '@/components/custom/overview-retention';
 import OverviewTopEventsProperties from '@/components/custom/overview-top-events-properties';
-import OverviewTopGames from '@/components/custom/overview-top-games';
+import OverviewGames from '@/components/custom/overview-games';
 import {
   DEFAULT_WIDGETS,
   type OverviewWidgetDef,
@@ -21,12 +21,15 @@ const RETENTION: OverviewWidgetDef = {
   lazyViewport: true,
 };
 
-// Top games (levels started / completed / play-through rate). Takes the
-// top-devices slot so it sits side by side with Top events (see reordering
-// below); top-devices moves down to pair with Top geo.
-const TOP_GAMES: OverviewWidgetDef = {
-  key: 'top-games',
-  component: OverviewTopGames,
+// Games — every game side by side (players / sessions / opened / completion /
+// returning / median solve, with a daily-opens sparkline per row). Full width:
+// it carries eight columns plus a chart, and it is the view stakeholders
+// screenshot, so it gets the room rather than being squeezed into a half.
+// Takes the top-devices slot (see reordering below); top-devices moves down to
+// pair with Top geo.
+const GAMES: OverviewWidgetDef = {
+  key: 'games',
+  component: OverviewGames,
   contexts: ['dashboard', 'share'],
 };
 
@@ -57,16 +60,17 @@ const FORK_WIDGETS: OverviewWidgetDef[] = DEFAULT_WIDGETS
   // Swap Top games into the top-devices slot and move top-devices after
   // top-events, so Games + Events sit side by side and Devices pairs with Geo.
   .flatMap(w => {
-    if (w.key === 'top-devices') return [TOP_GAMES];
+    if (w.key === 'top-devices') return [GAMES];
     // Swap in the drill-down Events widget (event -> property keys -> values).
     if (w.key === 'top-events') {
       return [{ ...w, component: OverviewTopEventsProperties }, TOP_DEVICES];
     }
-    // Top geo (the heaviest cold-load query, overview.map) pairs with Top
-    // devices in the bottom row — defer it to viewport too so the heavy map
-    // scan leaves the initial burst. Half width like devices.
+    // Top geo (the heaviest cold-load query, overview.map) stays deferred to
+    // viewport so the heavy map scan leaves the initial burst. Full width: with
+    // Games taking a full row, Events and Devices pair off and Geo would
+    // otherwise sit alone in a half-width column with dead space beside it.
     if (w.key === 'top-geo') {
-      return [{ ...w, lazyViewport: true, wrapperClassName: 'col-span-6 md:col-span-3' }];
+      return [{ ...w, lazyViewport: true }];
     }
     return [w];
   });

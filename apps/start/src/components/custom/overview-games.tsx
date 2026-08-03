@@ -89,7 +89,6 @@ export default function OverviewGames({
   );
 
   const rows = query.data?.rows ?? [];
-  const nonPlayableCount = query.data?.nonPlayableCount ?? 0;
   // At most ~13 rows, so plain derivation beats memoization.
   const maxOpens = Math.max(1, ...rows.map((g) => g.opens));
   // One y-domain across every sparkline: scaled per row, a 200/day game would
@@ -211,20 +210,15 @@ export default function OverviewGames({
           />
         )}
       </WidgetBody>
-      <WidgetFooter>
-        <p className="text-muted-foreground text-xs">
-          Median solve is time to finish a completed puzzle, so it excludes
-          abandoned attempts.
-          {nonPlayableCount > 0 &&
-            ` ${nonPlayableCount} non-playable ${
-              nonPlayableCount === 1 ? 'surface' : 'surfaces'
-            } (leaderboards, profiles) excluded.`}
-          {hasRateOverHundred &&
-            ' Completion above 100% means more puzzles were finished than' +
-              ' opened in this view — either they were opened before the range' +
-              ' started, or an active filter matches the two events unevenly.'}
-        </p>
-      </WidgetFooter>
+      {hasRateOverHundred && (
+        <WidgetFooter>
+          <p className="text-muted-foreground text-xs">
+            Completion above 100% means more puzzles were finished than opened
+            in this view — either they were opened before the range started, or
+            an active filter matches the two events unevenly.
+          </p>
+        </WidgetFooter>
+      )}
     </Widget>
   );
 }

@@ -33,12 +33,6 @@ import { overviewService } from './overview.service';
 const GAME_KEY_EXPR = "if(game_tag != '', game_tag, game_id)";
 const PUZZLE_OPEN_KEY = 'session_id, level_id';
 
-// Solve time rides on level_completed only, and only since 2026-03-14 (verified
-// on prod: 0% coverage before, ~100% after). It is therefore time-to-solve on
-// FINISHED puzzles — abandoned attempts contribute nothing, and a range that
-// starts before the cutover will under-report. Never present it as "time spent
-// on the game".
-//
 // `!= 0` is not the old `!= ''`: the materialized column (code-migration 21)
 // cannot tell a missing property from a literal '0', so zero-second solves are
 // excluded rather than counted as 0.0.
@@ -86,12 +80,6 @@ export type IGameBreakdownRow = {
 
 export type IGameBreakdown = {
   rows: IGameBreakdownRow[];
-  /**
-   * Game keys seen in range that never had a puzzle opened — leaderboard/profile
-   * surfaces that carry a game tag but are not playable. Excluded from the rows,
-   * reported here so the exclusion is visible instead of silent.
-   */
-  nonPlayableCount: number;
 };
 
 type GameBreakdownInput = {
@@ -119,11 +107,7 @@ class OverviewGamesService {
 
     const seriesByGame = new Map(series.map((s) => [s.game, s.series]));
 
-    // A game key with no puzzle opened in range is a non-playable surface
-    // (leaderboard, profile). Counted, not listed — and not folded into "Other",
-    // which is about games that lost the ranking, not about non-games.
     const playable = totals.filter((t) => t.opens > 0);
-    const nonPlayableCount = totals.length - playable.length;
 
     const ranked = playable.map((t) => ({
       game: t.game,
@@ -141,7 +125,7 @@ class OverviewGamesService {
       series: seriesByGame.get(t.game) ?? [],
     }));
 
-    return { rows: foldTail(ranked), nonPlayableCount };
+    return { rows: foldTail(ranked) };
   }
 
   /** Range-level aggregates. Distinct counts here cannot come from daily rows. */

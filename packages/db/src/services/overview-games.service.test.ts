@@ -5,7 +5,6 @@ import {
   type IGameBreakdownRow,
 } from './overview-games.service';
 
-/** A ranked row carrying just enough to make the fold's arithmetic observable. */
 function row(
   game: string,
   overrides: Partial<IGameBreakdownRow> = {}
@@ -24,7 +23,6 @@ function row(
   };
 }
 
-/** `count` ranked rows named game1..gameN. */
 function rows(count: number): IGameBreakdownRow[] {
   return Array.from({ length: count }, (_, i) => row(`game${i + 1}`));
 }
@@ -37,8 +35,6 @@ describe('foldTail', () => {
   });
 
   it('shows a 13th game as itself rather than folding one game', () => {
-    // The daily-mail case: folding here would cost that game its name, players,
-    // sessions and median to buy back nothing, and read "Other (1 games)".
     const result = foldTail(rows(13));
 
     expect(result).toHaveLength(13);
@@ -57,8 +53,8 @@ describe('foldTail', () => {
     });
   });
 
+  // Guards the plural in the UI's `Other (${other_count} games)`.
   it('never emits an "Other" row for a single game', () => {
-    // Guards the plural in the UI's `Other (${other_count} games)`.
     for (let n = 0; n <= 40; n++) {
       const other = foldTail(rows(n)).find((r) => r.is_other);
       expect(other?.other_count ?? 2).toBeGreaterThan(1);
@@ -76,8 +72,7 @@ describe('foldTail', () => {
     expect(other.opens).toBe(400);
     expect(other.completes).toBe(100);
     expect(other.completion_rate).toBe(25);
-    // Distinct counts and a median do not add up, so they stay at the 0 the UI
-    // renders as "n/a" — never a plausible-looking sum.
+    // 0, not a plausible-looking sum — the UI renders these as "n/a".
     expect(other.players).toBe(0);
     expect(other.sessions).toBe(0);
     expect(other.returning_rate).toBe(0);
@@ -105,17 +100,9 @@ describe('foldTail', () => {
   });
 });
 
-/**
- * The day list the Games sparkline is densified against. Every case below is a
- * real bound shape produced by getDatesFromRange (date.service.ts) — the two
- * families are ranges that end at `.endOf('day').plus(1ms)` (an exclusive
- * midnight boundary, so the trailing day is not part of the range) and ranges
- * that end at `23:59:59` (an inclusive final day that is kept).
- */
+// Every bound below is a real shape getDatesFromRange (date.service.ts) emits.
 describe('expectedDays', () => {
   it("drops the trailing day of an exclusive midnight bound ('30d')", () => {
-    // 30d resolves to today-30 00:00:00 -> tomorrow 00:00:00, and means the 31
-    // calendar days today-30..today inclusive.
     const days = expectedDays('2026-07-04 00:00:00', '2026-08-04 00:00:00');
 
     expect(days).toHaveLength(31);
@@ -152,8 +139,7 @@ describe('expectedDays', () => {
   });
 
   it('neither skips nor duplicates a day across a DST transition', () => {
-    // Europe/London springs forward on 2026-03-29. Stepping in UTC on date-only
-    // values keeps 03-29 present exactly once; local-time arithmetic would not.
+    // Europe/London springs forward on 2026-03-29.
     expect(expectedDays('2026-03-28 00:00:00', '2026-03-31 00:00:00')).toEqual([
       '2026-03-28',
       '2026-03-29',
@@ -176,8 +162,6 @@ describe('expectedDays', () => {
   });
 
   it('returns nothing when an exclusive bound collapses the range', () => {
-    // 'today' would never produce this, but a caller passing a midnight end on
-    // the start day must not yield a phantom day.
     expect(expectedDays('2026-08-03 00:00:00', '2026-08-03 00:00:00')).toEqual(
       []
     );

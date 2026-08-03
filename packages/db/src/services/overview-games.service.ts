@@ -17,36 +17,19 @@
  * grains therefore need two aggregations; they run in parallel and are cached
  * by the router.
  *
- * Cost scales with the project, so measure against the biggest one rather than a
- * median. On a 4.7M-row project the pair is ~55-85ms; on daily-mail (22M rows /
- * 30d) it was 2.65s for a 30d window and 5.91s for 12m before the two fixes
- * below — the properties-Map read for the median (worth 1.35s of the 2.65s,
- * removed by materializing time_seconds in code-migration 21) and the daily
- * series scanning event names it never aggregates.
- *
- * This widget is third on the overview and is not deferred to viewport (it sits
- * above the fold), so its cost lands squarely in the cold-load burst that the
- * widget config elsewhere works to keep clear. Anything added here should read
- * materialized columns, never `properties`.
+ * Both run on the overview's cold load, where cost scales with the largest
+ * project rather than the median one — read materialized columns here, never
+ * `properties`.
  */
 import type { IChartEventFilter } from '@openpanel/validation';
 import { ch, TABLE_NAMES } from '../clickhouse/client';
 import { clix } from '../clickhouse/query-builder';
+// Only for getRawWhereClause — the widget must honour the same dashboard filters
+// as every other overview query, and a second filter whitelist here would drift.
 import { overviewService } from './overview.service';
 
-// The resolved game key and puzzle-open identity. Mirrors GAME_KEY_EXPR /
-// PUZZLE_OPEN_KEY in overview.service.ts — kept as local copies. If the upstream
-// definitions ever change, these must change with them.
-//
-// These were originally copied to keep this fork-only file free of any import
-// edge into an upstream-tracked module. That is no longer the goal: the file now
-// imports overviewService for getRawWhereClause, because the widget has to honour
-// the same dashboard filters every other overview query does, and reimplementing
-// the filter whitelist here would be a far worse kind of duplication. The edge is
-// deliberate and narrow — one call, to a method the fork already modifies (it
-// carries the GAME_KEY_FILTER branch). Note the trade it makes: an upstream
-// rename of getRawWhereClause breaks this file at compile time rather than
-// surfacing as a merge conflict, so it will not announce itself in a pull.
+// Local copies of overview.service.ts's GAME_KEY_EXPR / PUZZLE_OPEN_KEY. If the
+// upstream definitions change, these must change with them.
 const GAME_KEY_EXPR = "if(game_tag != '', game_tag, game_id)";
 const PUZZLE_OPEN_KEY = 'session_id, level_id';
 
@@ -56,28 +39,16 @@ const PUZZLE_OPEN_KEY = 'session_id, level_id';
 // starts before the cutover will under-report. Never present it as "time spent
 // on the game".
 //
-// Reads the materialized `time_seconds` column (code-migration 21), not
-// properties['time_seconds']: the Map read decompresses the whole map per row
-// and was over half this widget's cost on prod (daily-mail 30d: 2.65s -> 1.30s
-// once it is a column). Same reasoning as game_id / game_tag / level_id before
-// it — see migrations 18/19/20.
-//
-// The presence test is `!= 0` rather than the old `!= ''`. The column cannot
-// tell a missing property from a literal '0', but a zero-second solve is not a
-// real solve either way, and the string is literally '0' on 20 of 2.53M
-// level_completed events over 30d on prod.
+// `!= 0` is not the old `!= ''`: the materialized column (code-migration 21)
+// cannot tell a missing property from a literal '0', so zero-second solves are
+// excluded rather than counted as 0.0.
 const SOLVE_SECONDS = 'time_seconds';
 const HAS_SOLVE_SECONDS = `name = 'level_completed' AND ${SOLVE_SECONDS} != 0`;
 
-// Events that carry a game identity at ~100% — re-verified on prod over 30d:
-// level_started 100.0%, level_completed 100.0%, session_started 100.0%.
-// The built-in `session_start` is excluded on purpose: only 68.9% of them carry
-// a game, a structural gap that is stable across 9 weeks, so including it would
-// silently undercount every per-game figure by about a third. Note this is a
-// different event from the Puzzlr-emitted `session_started` below, which is the
-// one the returning-rate numerator and denominator both count.
-//
-// Only getTotals needs the full set; the daily series reads level_started alone.
+// Events that carry a game identity on ~100% of rows. Puzzlr's `session_started`
+// is NOT the built-in `session_start`, which carries one on only ~two thirds and
+// would silently undercount every per-game figure. Used by getTotals only; the
+// daily series reads level_started alone.
 const GAME_BEARING_EVENTS = [
   'level_started',
   'level_completed',
@@ -86,21 +57,12 @@ const GAME_BEARING_EVENTS = [
 
 /**
  * Games shown by name before the remainder is folded into a single "Other" row.
- * Real projects range from 6 to 33 distinct game keys (prod, 30d), so the cap is
- * load-bearing, not hypothetical — but the remainder is always surfaced rather
- * than dropped.
+ * Real projects range from 6 to 33 distinct game keys, so the cap is
+ * load-bearing — but the remainder is always surfaced rather than dropped.
  */
 const MAX_NAMED_GAME_ROWS = 12;
 
-/**
- * Above MAX_NAMED_GAME_ROWS the tail is folded, but one row of overshoot is left
- * alone: folding a *single* game into "Other" costs more than it saves. That row
- * loses its name, its players, its sessions and its median (none of which
- * survive the fold — see IGameBreakdownRow) and buys back nothing, and it reads
- * as "Other (1 games)". Measured on prod, this is not a corner case: of the two
- * projects that exceed the cap at all, daily-mail has exactly 13 playable game
- * keys. So a 13th game is shown as itself, and folding starts at 14.
- */
+/** One row of overshoot: folding a lone game costs it everything and saves nothing. */
 const MAX_GAME_ROWS_BEFORE_FOLD = MAX_NAMED_GAME_ROWS + 1;
 
 export type IGameBreakdownRow = {
@@ -266,9 +228,6 @@ class OverviewGamesService {
       ])
       .from(TABLE_NAMES.events, false)
       .where('project_id', '=', projectId)
-      // Only level_started, not the full GAME_BEARING_EVENTS set the totals
-      // query needs: the other two names contribute nothing to this aggregate,
-      // so scanning them was pure cost (prod daily-mail 30d: 0.59s -> 0.47s).
       .where('name', '=', 'level_started')
       .where('created_at', 'BETWEEN', [
         clix.datetime(startDate, 'toDateTime'),
@@ -307,17 +266,9 @@ class OverviewGamesService {
 }
 
 /**
- * Caps the table at MAX_GAME_ROWS_BEFORE_FOLD rows, folding whatever the cap cuts
- * off into a single synthetic "Other" row. Rows must already be ranked (the
- * server orders by opens DESC), since the fold takes the tail as given.
- *
- * Only the additive measures survive the fold. Distinct counts and a median
- * cannot be summed across games, so players / sessions / returning / median are
- * emitted as 0 and rendered as "n/a" — see IGameBreakdownRow.is_other. That loss
- * is the whole reason the cap tolerates one row of overshoot; see
- * MAX_GAME_ROWS_BEFORE_FOLD.
- *
- * Exported for tests.
+ * Folds the tail past the cap into one "Other" row. Input must already be ranked.
+ * Only additive measures survive: distinct counts and a median cannot be summed
+ * across games, so they are emitted as 0 — see IGameBreakdownRow.is_other.
  */
 export function foldTail(ranked: IGameBreakdownRow[]): IGameBreakdownRow[] {
   if (ranked.length <= MAX_GAME_ROWS_BEFORE_FOLD) {
@@ -329,8 +280,7 @@ export function foldTail(ranked: IGameBreakdownRow[]): IGameBreakdownRow[] {
 
   const otherOpens = rest.reduce((sum, r) => sum + r.opens, 0);
   const otherCompletes = rest.reduce((sum, r) => sum + r.completes, 0);
-  // Index-aligned across rows by construction (see getDailySeries), so summing
-  // position i across the tail is summing the same day across the tail.
+  // Index i is the same day in every row (see getDailySeries), so this sums days.
   const seriesLength = shown[0]?.series.length ?? 0;
   const otherSeries = Array.from({ length: seriesLength }, (_, i) =>
     rest.reduce((sum, r) => sum + (r.series[i] ?? 0), 0)

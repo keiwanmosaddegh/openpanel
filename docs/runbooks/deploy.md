@@ -42,8 +42,12 @@ check after ship — the babysit window is a fine time.
 Notes on preflight's ⛔ exits and warnings:
 - **Dirty/unpushed tree** → stop and ask; never commit or push on your own initiative.
 - **code-migrations in the release** (exit 2) → read the migration, summarize what it does
-  to the operator, and wait. ClickHouse migrations can rewrite large tables; the operator
-  decides routine flow vs supervised run (§4).
+  to the operator, and wait. The operator decides routine flow vs supervised run (§4). What
+  makes a ClickHouse migration heavy is rewriting existing rows — an `UPDATE`, a re-sort, a
+  type change. Adding a MATERIALIZED column is not that: it writes one new column file per
+  part, returns immediately (`mutations_sync` is unset), and old parts compute the value on
+  read until it lands, so correctness never depends on the backfill. Measured 2026-08-03:
+  `MATERIALIZE COLUMN time_seconds` over 103M rows finished in seconds.
 - **prisma-only** → proceed; migrations auto-run on op-api start, its 600 s healthcheck
   `start_period` absorbs them, and caddy only routes once api+dashboard are healthy. But
   auto-rollback is disarmed (§2).
@@ -134,7 +138,3 @@ Worked example: the v1→v2 upgrade plan, Phase 4.8 (retired after completion; s
 - **2026-06-05 (main-9a94993, first SHA deploy):** `docker-build all` / `docker-release` /
   revision check / babysit all validated live — 8/8 verify, all babysit rounds clean,
   acceptance check confirmed visually. Rollback-via-release still untested.
-- **2026-06-05 (script consolidation):** `preflight` / `ship` / `verify-prod` replace the
-  prose command sequences (zero-placeholder rework of this runbook). Not yet live-tested —
-  **first use = live test**; the underlying ssh commands are verbatim what the 06-05
-  deploy ran by hand.

@@ -19,8 +19,11 @@ while [ $# -gt 0 ]; do
 done
 
 if [ -n "$WATCH" ]; then
-    # Detached on the VPS — survives a dropped ssh; don't hold a long session.
-    ssh "$VPS" "cd ~/openpanel/self-hosting && OP_EXPECTED_REVISION=$EXPECTED nohup ./verify-deploy --watch $WATCH </dev/null >/root/babysit.log 2>&1 & echo 'babysit started ($WATCH min)'"
+    # Detached on the VPS — survives a dropped ssh, and returns immediately.
+    # The braces are load-bearing: `&` backgrounds the whole list, so the redirect
+    # has to cover the group. On nohup alone the subshell keeps ssh's stdout and
+    # ssh blocks for the entire watch (measured: 70s for --watch 1).
+    ssh "$VPS" "{ cd ~/openpanel/self-hosting && OP_EXPECTED_REVISION=$EXPECTED nohup ./verify-deploy --watch $WATCH; } </dev/null >/root/babysit.log 2>&1 & echo 'babysit started ($WATCH min)'"
     echo "poll:     ssh $VPS 'tail -3 /root/babysit.log'"
     echo "finished: when a BABYSIT RESULT line appears"
 else

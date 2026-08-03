@@ -28,6 +28,8 @@ export * from './src/services/organization.service';
 export * from './src/services/overview.service';
 // fork-only: per-game breakdown behind the overview Games widget.
 export * from './src/services/overview-games.service';
+// fork-only: share-safe surface option list behind the overview surface picker.
+export * from './src/services/overview-surfaces.service';
 export * from './src/services/pages.service';
 export * from './src/services/profile.service';
 export * from './src/services/project.service';

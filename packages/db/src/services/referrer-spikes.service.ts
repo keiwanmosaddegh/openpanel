@@ -74,7 +74,14 @@ export async function getReferrerSpikes(
   input: GetReferrerSpikesInput,
 ): Promise<ReferrerSpikeCluster[]> {
   const { projectId, filters, startDate, endDate, interval, timezone } = input;
-  const filtersWhere = overviewService.getRawWhereClause('sessions', filters);
+  // fork: the scope, without which a `surface` filter is silently dropped (see
+  // getRawWhereClause). These markers are drawn on top of the overview's
+  // session line, so they must be scoped identically to it.
+  const filtersWhere = overviewService.getRawWhereClause('sessions', filters, {
+    projectId,
+    startDate,
+    endDate,
+  });
 
   // Step 1: top non-direct referrers by total range volume. Bounds the
   // expensive per-bucket query — long-tail referrers can't produce

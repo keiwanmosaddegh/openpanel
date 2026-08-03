@@ -98,26 +98,22 @@ const GAME_KEY_FILTER = 'game_key';
 // fork: surface — which of the publisher's products an embed runs inside.
 //
 // Values are FREE-FORM and host-declared (puzzlr ADR-0008): the host sets
-// `data-embed-surface` to whatever its own vocabulary uses — `news_web`,
-// `news_app`, `game_app` — and the client falls back to the system-resolved
-// `web` | `app` | `embed` only when the attribute is absent. The vocabulary is
-// a per-tenant contract, deliberately NOT an enum in shared code, so this file
-// must never map values into fixed buckets: a tenant running both `game_app`
-// and `news_app` would see the one distinction they asked for collapse. Values
-// pass through raw, exactly like `origin` or `country`.
+// `data-embed-surface` to its own vocabulary (`news_web`, `news_app`,
+// `game_app`, …) and the client falls back to the system-resolved
+// `web` | `app` | `embed` only when the attribute is absent. Deliberately not an
+// enum in shared code, so nothing here may map values into fixed buckets — a
+// tenant running both `game_app` and `news_app` would lose the one distinction
+// it asked for. Values pass through raw, like `origin` or `country`.
 //
-// What IS special here is the scope. A *visit-scoped* dimension in Matomo's
-// sense, and that is the whole design. The property is missing on 28% of rows
-// because Openpanel's automatic screen_view / session_end / link_out are
-// emitted inside the SDK, below the reportEvent chokepoint that stamps it
-// (ADR-0008 consequences), so a plain column predicate would silently drop
-// them — Top pages, built on screen_view, would return nothing at all. But a
-// *session* carries exactly one surface: 54,651 of 54,676 tages-anzeiger
-// sessions over 14d have a single distinct non-empty value, 24 have two, 3 have
-// none. So the filter resolves through the session, never through the row —
-// which is also what makes it legitimate to apply to the session-scoped widgets
-// (bounce rate, duration), the thing Plausible forbids for genuinely
-// event-level dimensions.
+// The filter resolves through the SESSION, never the row. `embed_surface` is
+// missing on 28% of event rows — Openpanel's automatic screen_view /
+// session_end / link_out are emitted inside the SDK, below the reportEvent
+// chokepoint that stamps it — so a plain column predicate would silently drop
+// them and Top pages, built on screen_view, would return nothing at all. A
+// session, by contrast, carries exactly one surface: over 14d, 54,651 of 54,676
+// tages-anzeiger sessions have a single distinct non-empty value, 24 have two,
+// 3 have none. That is also what makes it legitimate to apply to the
+// session-scoped widgets (bounce rate, duration).
 const SURFACE_FILTER = 'surface';
 
 /** Query scope needed to bound the surface sub-select. */
@@ -830,9 +826,9 @@ export class OverviewService {
       .where('name', '=', 'session_started')
       .where('created_at', '>=', clix.datetime(lookbackStart, 'toDateTime'))
       .where('created_at', '<=', clix.datetime(endDate, 'toDateTime'))
-      // Scope the surface sub-select to this query's own look-back, not the
-      // display window — the outer scan starts at lookbackStart, so a sub-select
-      // bounded by startDate would miss the sessions of the earliest cohorts.
+      // Bound the surface sub-select by this query's look-back, not the display
+      // window: the outer scan starts at lookbackStart, so startDate would miss
+      // the earliest cohorts' sessions.
       .rawWhere(
         this.getRawWhereClause('events', filters, {
           projectId,
@@ -1060,40 +1056,30 @@ export class OverviewService {
   }
 
   /**
-   * fork: the session-id sub-select behind the surface filter. Returns [] when
-   * no surface filter is set, so the common path emits no extra SQL at all.
+   * fork: the session-id sub-select behind the surface filter (SURFACE_FILTER
+   * above). Returns [] when no surface is selected, so the common path emits no
+   * extra SQL.
    *
-   * Bounded by project and the widget's own date range — the same bounds the
-   * outer query already carries, so the scan is never wider than the query it
-   * is filtering. Measured on prod's busiest project (tages-anzeiger, 7d):
-   * 0.27s. Reads the materialized `embed_surface` column (code-migration 22),
-   * not the properties Map.
-   *
-   * `type` picks the column the sub-select is matched against — `id` on the
-   * sessions table, `session_id` on events — which is the only difference
-   * between scoping a session query and an event query by surface.
+   * Bounded by the same project and date range the outer query already carries,
+   * so the scan is never wider than the query it filters, and it reads the
+   * materialized `embed_surface` column (code-migration 22) rather than the
+   * properties Map. 0.27s on prod's busiest project (tages-anzeiger, 7d).
    */
   private getSurfaceConds(
     type: 'events' | 'sessions',
     filters: IChartEventFilter[],
-    scope: IQueryScope | undefined,
+    scope: IQueryScope,
   ): string[] {
-    if (!scope) {
-      return [];
-    }
-
-    // Free-form host-declared values, passed through raw. Empty strings are
-    // dropped: `embed_surface = ''` is the pre-ADR-0008 "not set" state, not a
-    // surface anyone can select, and letting it through would silently match
-    // every un-instrumented session.
+    // Raw and unbucketed. '' is the pre-ADR-0008 "not set" state, not a surface
+    // anyone can select — letting it through would silently match every
+    // un-instrumented session.
     const rawValues = filters
       .filter((item) => item.name === SURFACE_FILTER)
       .flatMap((item) => item.value ?? [])
       .map((v) => String(v))
       .filter((v) => v !== '');
 
-    // Emitting `IN ()` would be a syntax error, so drop the filter entirely
-    // rather than break every widget on the page.
+    // `IN ()` is a syntax error — drop the filter rather than break every widget.
     if (rawValues.length === 0) {
       return [];
     }
@@ -1111,10 +1097,25 @@ export class OverviewService {
     ];
   }
 
+  /**
+   * fork: `scope` is a FORK-ADDED third parameter (upstream:
+   * `getRawWhereClause(type, filters)`). It bounds the surface sub-select,
+   * which `filters` alone cannot, so every widget query hands its own down.
+   *
+   * REQUIRED on purpose: while it was optional, omitting it did not merely skip
+   * the surface predicate — `surface` is stripped out of `filters` regardless —
+   * so the filter was silently DISCARDED and the widget answered across every
+   * surface. That shipped once (referrer-spikes.service.ts, main-13e18da).
+   *
+   * Upstream merge: call-site conflicts are mechanical in general, but read the
+   * scope each site actually passes rather than pasting a fixed string —
+   * getCohortRetention deliberately passes `lookbackStart`, not `startDate`.
+   * `referrer-spikes.service.ts` exists upstream too and diverges the same way.
+   */
   getRawWhereClause(
     type: 'events' | 'sessions',
     filters: IChartEventFilter[],
-    scope?: IQueryScope,
+    scope: IQueryScope,
   ) {
     // fork: the per-game picker sends a synthetic `game_key` filter. Scope it by
     // the resolved GAME_KEY_EXPR — the same expression Top Games groups by — so

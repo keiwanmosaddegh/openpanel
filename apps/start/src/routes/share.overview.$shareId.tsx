@@ -4,6 +4,7 @@ import { FullPageEmptyState } from '@/components/full-page-empty-state';
 import FullPageLoadingState from '@/components/full-page-loading-state';
 import { LazyComponent } from '@/components/lazy-component';
 import { OverviewFiltersButtons } from '@/components/overview/filters/overview-filters-buttons';
+import { SurfaceFilter } from '@/components/overview/filters/surface-filter';
 import { LiveCounter } from '@/components/overview/live-counter';
 import { OverviewInterval } from '@/components/overview/overview-interval';
 import { OverviewRange } from '@/components/overview/overview-range';
@@ -91,6 +92,7 @@ function RouteComponent() {
             <div className="flex gap-2">
               <OverviewRange />
               <OverviewInterval />
+              <SurfaceFilter projectId={projectId} shareId={shareId} />
             </div>
             <div className="flex gap-2">
               <LiveCounter projectId={projectId} shareId={shareId} />

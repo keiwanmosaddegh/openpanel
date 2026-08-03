@@ -9,27 +9,23 @@ import { getIsCluster } from './helpers';
 // embed_surface is the host the game was played in — the "web vs app" split
 // clients ask for. Same rationale as migrations 18/19/20/21: it is read on the
 // overview's cold path (every widget, once a surface filter is set), and reading
-// it from the `properties` Map decompresses the whole map per row.
-//
-// Unlike its predecessors this column is also a *session* attribute, not just an
-// event one: on 14d of prod, 99.99% of sessions carry exactly one distinct
-// non-empty value (54,651 of 54,676 for tages-anzeiger; 3 sessions carry none).
-// That is what lets session-scoped widgets be filtered honestly — see
-// SURFACE_FILTER in overview.service.ts.
+// it from the `properties` Map decompresses the whole map per row. Unlike its
+// predecessors it is also a *session* attribute, which is what lets
+// session-scoped widgets be filtered honestly — see SURFACE_FILTER in
+// overview.service.ts.
 //
 // Values are FREE-FORM, not an enum. The host declares them via
-// `data-embed-surface` (puzzlr ADR-0008) using its own vocabulary; the two-tier
-// look in the data is declared-vs-fallback, not a taxonomy:
+// `data-embed-surface` (puzzlr ADR-0008); the two-tier look in the data is
+// declared-vs-fallback, not a taxonomy:
 //
 //   declared by the host   news_web, news_app, game_app, …  (per-tenant contract)
 //   system fallback        web | app | embed                (attribute absent)
 //
-// So `embed` and `news_web` co-existing in one project is a tenant part-way
-// through wiring the attribute up, not two different surfaces — and NOT a
-// rename: on 14d of prod, tages-anzeiger emits app/news_web/embed/web/news_app
-// concurrently while berner-zeitung is still mostly on the `embed` fallback.
-// Consumers must therefore never map values into fixed buckets; read the live
-// value list per project instead.
+// So `embed` alongside `news_web` in one project is a tenant part-way through
+// wiring the attribute up — not two surfaces, and not a rename: on 14d of prod
+// tages-anzeiger emits app/news_web/embed/web/news_app concurrently while
+// berner-zeitung is still mostly on the fallback. Never bucket; read the live
+// value list per project.
 //
 // Populates going forward only — no backfill. First covered day fleet-wide is
 // 2026-06-13 (business-insider 06-12; bund 06-29, tribune-de-geneve 07-22 and

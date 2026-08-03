@@ -418,13 +418,16 @@ describe('chart.service / getAggregateChartSql', () => {
   });
 });
 
+// Required third argument; inert here — no case below sets a `surface` filter.
+const whereScope = { projectId: PROJECT_ID, startDate: START, endDate: END };
+
 describe('overview.service / getRawWhereClause (UTM remapping)', () => {
   const svc = new OverviewService(ch);
 
   it('rewrites utm_* to properties[__query.utm_*] for the events table', () => {
     const where = svc.getRawWhereClause('events', [
       { name: 'utm_source', operator: 'is', value: ['awn'] },
-    ]);
+    ], whereScope);
     expect(where).toContain("properties['__query.utm_source']");
     expect(where).not.toMatch(/(?<![._\w])utm_source\s*=/);
   });
@@ -432,7 +435,7 @@ describe('overview.service / getRawWhereClause (UTM remapping)', () => {
   it('keeps utm_* as a top-level column for the sessions table', () => {
     const where = svc.getRawWhereClause('sessions', [
       { name: 'utm_source', operator: 'is', value: ['awn'] },
-    ]);
+    ], whereScope);
     expect(where).toMatch(/(?<![._\w])utm_source\s*=/);
     expect(where).not.toContain("properties['__query.utm_source']");
   });
@@ -440,14 +443,14 @@ describe('overview.service / getRawWhereClause (UTM remapping)', () => {
   it('drops non-whitelisted filters', () => {
     const where = svc.getRawWhereClause('events', [
       { name: 'malicious_column', operator: 'is', value: ['x'] },
-    ]);
+    ], whereScope);
     expect(where).toBe('');
   });
 
   itCH('events utm_source filter parses against real events table', async () => {
     const where = svc.getRawWhereClause('events', [
       { name: 'utm_source', operator: 'is', value: ['awn'] },
-    ]);
+    ], whereScope);
     expect(where).toBeTruthy();
     await explain(
       `SELECT count() FROM events WHERE project_id = '${PROJECT_ID}' AND ${where}`,
@@ -457,7 +460,7 @@ describe('overview.service / getRawWhereClause (UTM remapping)', () => {
   itCH('sessions utm_source filter parses against real sessions table', async () => {
     const where = svc.getRawWhereClause('sessions', [
       { name: 'utm_source', operator: 'is', value: ['awn'] },
-    ]);
+    ], whereScope);
     expect(where).toBeTruthy();
     await explain(
       `SELECT count() FROM sessions WHERE project_id = '${PROJECT_ID}' AND ${where}`,
@@ -475,7 +478,7 @@ describe('overview.service / getRawWhereClause (game_key resolved filter)', () =
   it('emits the resolved if(game_tag,game_id) expression, not a raw property', () => {
     const where = svc.getRawWhereClause('events', [
       { name: 'game_key', operator: 'is', value: ['boxr'] },
-    ]);
+    ], whereScope);
     expect(where).toBe("if(game_tag != '', game_tag, game_id) = 'boxr'");
     expect(where).not.toContain("properties['game_tag']");
     expect(where).not.toContain("properties['game_key']");
@@ -484,7 +487,7 @@ describe('overview.service / getRawWhereClause (game_key resolved filter)', () =
   it('uses IN for multiple values', () => {
     const where = svc.getRawWhereClause('events', [
       { name: 'game_key', operator: 'is', value: ['boxr', 'sports-trace'] },
-    ]);
+    ], whereScope);
     expect(where).toBe(
       "if(game_tag != '', game_tag, game_id) IN ('boxr', 'sports-trace')",
     );
@@ -493,14 +496,14 @@ describe('overview.service / getRawWhereClause (game_key resolved filter)', () =
   it('drops the game_key filter for the sessions table (no game columns there)', () => {
     const where = svc.getRawWhereClause('sessions', [
       { name: 'game_key', operator: 'is', value: ['boxr'] },
-    ]);
+    ], whereScope);
     expect(where).toBe('');
   });
 
   it('escapes the value (no SQL injection via the picked game)', () => {
     const where = svc.getRawWhereClause('events', [
       { name: 'game_key', operator: 'is', value: ["boxr' OR 1=1 --"] },
-    ]);
+    ], whereScope);
     expect(where).not.toMatch(/OR 1=1 --\s*$/);
     expect(where).toContain("if(game_tag != '', game_tag, game_id) = 'boxr\\' OR 1=1 --'");
   });

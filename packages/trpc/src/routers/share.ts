@@ -1,12 +1,14 @@
 import ShortUniqueId from 'short-unique-id';
 
 import {
+  canExposeShareSurfaces,
   db,
   getDashboardById,
   getReportById,
   getReportsByDashboardId,
   getShareDashboardById,
   getShareReportById,
+  getSurfaceValues,
   transformReport,
 } from '@openpanel/db';
 import {
@@ -73,9 +75,34 @@ export const shareRouter = createTRPCRouter({
         return null;
       }
 
+      const hasAccess = !!ctx.cookies[`shared-overview-${share?.id}`];
+
+      // fork: the surface picker's option list, folded into the response the
+      // shared overview's route loader already awaits — zero extra round-trips.
+      // Only the shareId branch resolves it; the `projectId` branch is the
+      // logged-in dashboard's "is this shared?" check, which reads surfaces
+      // from `chart.values` and must not pay for a query it does not use. The
+      // project comes from the share row, never from input.
+      //
+      // It must never fail the response: this is the only ClickHouse dependency
+      // in an otherwise Postgres-only page shell, and the shared route renders
+      // a rejected loader as "Share not found". Degrade to [] — but log it, or
+      // an unreachable ClickHouse looks identical to a project with no surfaces.
+      const surfaces =
+        'shareId' in input && canExposeShareSurfaces(share, hasAccess)
+          ? await getSurfaceValues(share.projectId).catch((error) => {
+              ctx.req.log.error(
+                { err: error, shareId: share.id, projectId: share.projectId },
+                'Failed to resolve share surfaces, degrading to none',
+              );
+              return [];
+            })
+          : [];
+
       return {
         ...share,
-        hasAccess: !!ctx.cookies[`shared-overview-${share?.id}`],
+        hasAccess,
+        surfaces,
       };
     }),
   createOverview: protectedProcedure

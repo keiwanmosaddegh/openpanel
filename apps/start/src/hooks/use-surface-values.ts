@@ -2,29 +2,40 @@ import { useTRPC } from '@/integrations/trpc/react';
 import { useQuery } from '@tanstack/react-query';
 
 /**
- * The surfaces this project actually emits, newest-seen first.
+ * The surfaces this project actually emits, newest-seen first — read per
+ * project, never hardcoded or bucketed (see SURFACE_FILTER in
+ * overview.service.ts).
  *
- * `embed_surface` values are free-form and host-declared (puzzlr ADR-0008): the
- * host sets `data-embed-surface` to its own vocabulary (`news_web`, `game_app`,
- * …) and the client falls back to the system-resolved `web` | `app` | `embed`
- * only when the attribute is absent. So the option list cannot be hardcoded and
- * must never be bucketed — it is read per project.
- *
- * Backed by `event_property_values_mv`, which already indexes distinct property
- * values per project, so this costs no new materialization.
- *
- * NOTE: `chart.values` is a protectedProcedure and returns nothing in the
- * public-share context. Callers must degrade to hiding the control rather than
- * rendering an empty one.
+ * Two sources, one list. Logged in it comes from `chart.values`, a
+ * protectedProcedure that answers nothing without a session; on a share link it
+ * rides along on `share.overview`, which the shared route's loader already
+ * awaits, so the shared page gains the control without a round-trip. Both read
+ * the same table with the same ordering, so the lists cannot drift.
  */
-export function useSurfaceValues(projectId: string) {
+export function useSurfaceValues(projectId: string, shareId?: string) {
   const trpc = useTRPC();
-  const { data } = useQuery(
+  const isShared = !!shareId;
+
+  const { data: chartValues } = useQuery(
     trpc.chart.values.queryOptions(
       { projectId, event: '*', property: 'properties.embed_surface' },
-      { staleTime: 1000 * 60 * 60, enabled: !!projectId },
+      { staleTime: 1000 * 60 * 60, enabled: !isShared && !!projectId },
     ),
   );
-  // '' is the pre-ADR-0008 "not set" state, never a selectable surface.
-  return (data?.values ?? []).filter(Boolean);
+
+  // Same input as the route loader's `share.overview` call, so this hits the
+  // same query-cache entry rather than fetching.
+  const { data: share } = useQuery(
+    trpc.share.overview.queryOptions(
+      { shareId: shareId ?? '' },
+      { enabled: isShared },
+    ),
+  );
+
+  const values = isShared ? (share?.surfaces ?? []) : (chartValues?.values ?? []);
+  // '' is the pre-ADR-0008 "not set" state, never a selectable surface. The
+  // shared branch is filtered server-side already; the logged-in branch is not
+  // — `chart.values` is upstream's generic endpoint and returns whatever the
+  // table holds.
+  return values.filter(Boolean);
 }

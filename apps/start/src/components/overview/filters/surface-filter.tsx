@@ -4,29 +4,32 @@ import { useEventQueryFilters } from '@/hooks/use-event-query-filters';
 import { useSurfaceValues } from '@/hooks/use-surface-values';
 
 /**
- * fork: scopes the overview to one or more surfaces — which of the publisher's
- * products an embed ran inside.
- *
- * Multi-select rather than a fixed Web/App toggle, because `embed_surface`
- * values are free-form and host-declared (puzzlr ADR-0008) and this dashboard
- * must not assume a taxonomy: a tenant may run `game_app` + `news_app` +
- * `news_web` alongside the `web`/`app`/`embed` system fallback. Selecting
- * several composes the grouping at query time, so "both my app surfaces" is
- * expressible without the dashboard knowing what those words mean.
- *
- * Emits the synthetic `surface` filter, resolved through the session (not the
- * row) by SURFACE_FILTER in overview.service.ts.
+ * fork: scopes the overview to one or more surfaces. Multi-select rather than a
+ * fixed Web/App toggle because the values are free-form per tenant, so "both my
+ * app surfaces" has to be expressible without the dashboard knowing the
+ * vocabulary. Emits the synthetic `surface` filter — see SURFACE_FILTER in
+ * overview.service.ts.
  */
 export const SURFACE_FILTER = 'surface';
 
-export function SurfaceFilter() {
-  const { projectId } = useAppParams();
+interface SurfaceFilterProps {
+  /** Defaults to the route's project — pass it on routes without app params. */
+  projectId?: string;
+  /** Set on a public share link; switches the option list to the share source. */
+  shareId?: string;
+}
+
+export function SurfaceFilter({
+  projectId: projectIdProp,
+  shareId,
+}: SurfaceFilterProps = {}) {
+  const params = useAppParams();
+  const projectId = projectIdProp ?? params.projectId;
   const [filters, setFilter, , removeFilter] = useEventQueryFilters();
-  const surfaces = useSurfaceValues(projectId);
+  const surfaces = useSurfaceValues(projectId, shareId);
   const selected = filters.find((f) => f.name === SURFACE_FILTER)?.value ?? [];
 
-  // Hidden on a project with nothing to compare — and on shared dashboards,
-  // where the values query is unavailable and returns an empty list.
+  // Hidden on a project with nothing to compare — one surface is not a choice.
   if (surfaces.length < 2) {
     return null;
   }

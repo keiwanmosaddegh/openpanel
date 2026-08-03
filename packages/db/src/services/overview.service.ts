@@ -95,6 +95,38 @@ const PUZZLE_OPEN_KEY = 'session_id, level_id';
 // not a single whitelisted column), so it never reaches the whitelist above.
 const GAME_KEY_FILTER = 'game_key';
 
+// fork: surface — which of the publisher's products an embed runs inside.
+//
+// Values are FREE-FORM and host-declared (puzzlr ADR-0008): the host sets
+// `data-embed-surface` to whatever its own vocabulary uses — `news_web`,
+// `news_app`, `game_app` — and the client falls back to the system-resolved
+// `web` | `app` | `embed` only when the attribute is absent. The vocabulary is
+// a per-tenant contract, deliberately NOT an enum in shared code, so this file
+// must never map values into fixed buckets: a tenant running both `game_app`
+// and `news_app` would see the one distinction they asked for collapse. Values
+// pass through raw, exactly like `origin` or `country`.
+//
+// What IS special here is the scope. A *visit-scoped* dimension in Matomo's
+// sense, and that is the whole design. The property is missing on 28% of rows
+// because Openpanel's automatic screen_view / session_end / link_out are
+// emitted inside the SDK, below the reportEvent chokepoint that stamps it
+// (ADR-0008 consequences), so a plain column predicate would silently drop
+// them — Top pages, built on screen_view, would return nothing at all. But a
+// *session* carries exactly one surface: 54,651 of 54,676 tages-anzeiger
+// sessions over 14d have a single distinct non-empty value, 24 have two, 3 have
+// none. So the filter resolves through the session, never through the row —
+// which is also what makes it legitimate to apply to the session-scoped widgets
+// (bounce rate, duration), the thing Plausible forbids for genuinely
+// event-level dimensions.
+const SURFACE_FILTER = 'surface';
+
+/** Query scope needed to bound the surface sub-select. */
+type IQueryScope = {
+  projectId: string;
+  startDate: string;
+  endDate: string;
+};
+
 // Columns that exist on the sessions table but not on events — on events
 // they're stored inside the properties map under __query.utm_*.
 const UTM_COLUMNS = [
@@ -287,7 +319,7 @@ export class OverviewService {
         clix.datetime(startDate, 'toDateTime'),
         clix.datetime(endDate, 'toDateTime'),
       ])
-      .rawWhere(this.getRawWhereClause('events', filters))
+      .rawWhere(this.getRawWhereClause('events', filters, { projectId, startDate, endDate }))
       .groupBy(['date'])
       .rollup()
       .transform({
@@ -330,7 +362,7 @@ export class OverviewService {
     }
   ): ReturnType<typeof clix> {
     if (!this.isPageFilter(params.filters)) {
-      query.rawWhere(this.getRawWhereClause('sessions', params.filters));
+      query.rawWhere(this.getRawWhereClause('sessions', params.filters, params));
       return query;
     }
 
@@ -406,7 +438,7 @@ export class OverviewService {
     metrics: MetricsRow & { total_revenue: number };
     series: MetricsSeriesRow[];
   }> {
-    const where = this.getRawWhereClause('sessions', filters);
+    const where = this.getRawWhereClause('sessions', filters, { projectId, startDate, endDate });
     const fillConfig = this.getFillConfig(interval, startDate, endDate);
 
     // Session metrics query
@@ -547,7 +579,7 @@ export class OverviewService {
         clix.datetime(startDate, 'toDateTime'),
         clix.datetime(endDate, 'toDateTime'),
       ])
-      .rawWhere(this.getRawWhereClause('events', filters))
+      .rawWhere(this.getRawWhereClause('events', filters, { projectId, startDate, endDate }))
       .groupBy(['date'])
       .rollup()
       .orderBy('date', 'ASC')
@@ -568,7 +600,7 @@ export class OverviewService {
         clix.datetime(startDate, 'toDateTime'),
         clix.datetime(endDate, 'toDateTime'),
       ])
-      .rawWhere(this.getRawWhereClause('events', filters))
+      .rawWhere(this.getRawWhereClause('events', filters, { projectId, startDate, endDate }))
       .groupBy(['day']);
 
     const avgDauHeadlineQuery = clix(this.client, timezone)
@@ -644,7 +676,7 @@ export class OverviewService {
         clix.datetime(startDate, 'toDateTime'),
         clix.datetime(endDate, 'toDateTime'),
       ])
-      .rawWhere(this.getRawWhereClause('events', filters))
+      .rawWhere(this.getRawWhereClause('events', filters, { projectId, startDate, endDate }))
       .groupBy(['bucket', 'session_id']);
 
     const combinedQuery = clix(this.client, timezone)
@@ -725,7 +757,7 @@ export class OverviewService {
         clix.datetime(startDate, 'toDateTime'),
         clix.datetime(endDate, 'toDateTime'),
       ])
-      .rawWhere(this.getRawWhereClause('events', filters))
+      .rawWhere(this.getRawWhereClause('events', filters, { projectId, startDate, endDate }))
       .groupBy(['date'])
       .orderBy('date', 'ASC')
       .fill(fillConfig.from, fillConfig.to, fillConfig.step)
@@ -798,7 +830,16 @@ export class OverviewService {
       .where('name', '=', 'session_started')
       .where('created_at', '>=', clix.datetime(lookbackStart, 'toDateTime'))
       .where('created_at', '<=', clix.datetime(endDate, 'toDateTime'))
-      .rawWhere(this.getRawWhereClause('events', filters))
+      // Scope the surface sub-select to this query's own look-back, not the
+      // display window — the outer scan starts at lookbackStart, so a sub-select
+      // bounded by startDate would miss the sessions of the earliest cohorts.
+      .rawWhere(
+        this.getRawWhereClause('events', filters, {
+          projectId,
+          startDate: lookbackStart.toISOString(),
+          endDate,
+        }),
+      )
       .groupBy(['cohort_week', 'life_week'])
       // Censor BOTH boundaries so every plotted retention point has a complete
       // numerator and denominator:
@@ -842,7 +883,7 @@ export class OverviewService {
     metrics: MetricsRow & { total_revenue: number };
     series: MetricsSeriesRow[];
   }> {
-    const where = this.getRawWhereClause('sessions', filters);
+    const where = this.getRawWhereClause('sessions', filters, { projectId, startDate, endDate });
     const fillConfig = this.getFillConfig(interval, startDate, endDate);
 
     // CTE: per-event screen_view durations via window function
@@ -858,7 +899,7 @@ export class OverviewService {
         clix.datetime(startDate, 'toDateTime'),
         clix.datetime(endDate, 'toDateTime'),
       ])
-      .rawWhere(this.getRawWhereClause('events', filters));
+      .rawWhere(this.getRawWhereClause('events', filters, { projectId, startDate, endDate }));
 
     // CTE: avg duration per date bucket
     const avgDurationByDateQuery = clix(this.client, timezone)
@@ -900,7 +941,7 @@ export class OverviewService {
         clix.datetime(startDate, 'toDateTime'),
         clix.datetime(endDate, 'toDateTime'),
       ])
-      .rawWhere(this.getRawWhereClause('events', filters));
+      .rawWhere(this.getRawWhereClause('events', filters, { projectId, startDate, endDate }));
 
     // Use toDate for month/week intervals, toDateTime for others
     const rollupDate =
@@ -966,7 +1007,7 @@ export class OverviewService {
         clix.datetime(startDate, 'toDateTime'),
         clix.datetime(endDate, 'toDateTime'),
       ])
-      .rawWhere(this.getRawWhereClause('events', filters))
+      .rawWhere(this.getRawWhereClause('events', filters, { projectId, startDate, endDate }))
       .groupBy(['date', 'dss.bounce_rate', 'dur.avg_session_duration'])
       .orderBy('date', 'ASC')
       .fill(fillConfig.from, fillConfig.to, fillConfig.step)
@@ -1018,7 +1059,63 @@ export class OverviewService {
     };
   }
 
-  getRawWhereClause(type: 'events' | 'sessions', filters: IChartEventFilter[]) {
+  /**
+   * fork: the session-id sub-select behind the surface filter. Returns [] when
+   * no surface filter is set, so the common path emits no extra SQL at all.
+   *
+   * Bounded by project and the widget's own date range — the same bounds the
+   * outer query already carries, so the scan is never wider than the query it
+   * is filtering. Measured on prod's busiest project (tages-anzeiger, 7d):
+   * 0.27s. Reads the materialized `embed_surface` column (code-migration 22),
+   * not the properties Map.
+   *
+   * `type` picks the column the sub-select is matched against — `id` on the
+   * sessions table, `session_id` on events — which is the only difference
+   * between scoping a session query and an event query by surface.
+   */
+  private getSurfaceConds(
+    type: 'events' | 'sessions',
+    filters: IChartEventFilter[],
+    scope: IQueryScope | undefined,
+  ): string[] {
+    if (!scope) {
+      return [];
+    }
+
+    // Free-form host-declared values, passed through raw. Empty strings are
+    // dropped: `embed_surface = ''` is the pre-ADR-0008 "not set" state, not a
+    // surface anyone can select, and letting it through would silently match
+    // every un-instrumented session.
+    const rawValues = filters
+      .filter((item) => item.name === SURFACE_FILTER)
+      .flatMap((item) => item.value ?? [])
+      .map((v) => String(v))
+      .filter((v) => v !== '');
+
+    // Emitting `IN ()` would be a syntax error, so drop the filter entirely
+    // rather than break every widget on the page.
+    if (rawValues.length === 0) {
+      return [];
+    }
+
+    const idColumn = type === 'sessions' ? 'id' : 'session_id';
+    const inList = rawValues.map((v) => sqlstring.escape(v)).join(', ');
+    const from = sqlstring.escape(clix.datetime(scope.startDate));
+    const to = sqlstring.escape(clix.datetime(scope.endDate));
+
+    return [
+      `${idColumn} IN (SELECT DISTINCT session_id FROM ${TABLE_NAMES.events} ` +
+        `WHERE project_id = ${sqlstring.escape(scope.projectId)} ` +
+        `AND created_at BETWEEN toDateTime(${from}) AND toDateTime(${to}) ` +
+        `AND embed_surface IN (${inList}))`,
+    ];
+  }
+
+  getRawWhereClause(
+    type: 'events' | 'sessions',
+    filters: IChartEventFilter[],
+    scope?: IQueryScope,
+  ) {
     // fork: the per-game picker sends a synthetic `game_key` filter. Scope it by
     // the resolved GAME_KEY_EXPR — the same expression Top Games groups by — so
     // the drill-down matches the picked row across the game_tag cutover and for
@@ -1039,7 +1136,10 @@ export class OverviewService {
                 : `${GAME_KEY_EXPR} IN (${vals.join(', ')})`;
             })
         : [];
-    const rest = filters.filter((item) => item.name !== GAME_KEY_FILTER);
+    const surfaceConds = this.getSurfaceConds(type, filters, scope);
+    const rest = filters.filter(
+      (item) => item.name !== GAME_KEY_FILTER && item.name !== SURFACE_FILTER,
+    );
 
     const where = getEventFiltersWhereClause(
       rest.flatMap((item) => {
@@ -1082,7 +1182,9 @@ export class OverviewService {
       type,
     );
 
-    return [...Object.values(where), ...gameKeyConds].join(' AND ');
+    return [...Object.values(where), ...gameKeyConds, ...surfaceConds].join(
+      ' AND ',
+    );
   }
 
   async getTopPages({
@@ -1120,7 +1222,7 @@ export class OverviewService {
         clix.datetime(startDate, 'toDateTime'),
         clix.datetime(endDate, 'toDateTime'),
       ])
-      .rawWhere(this.getRawWhereClause('events', filters))
+      .rawWhere(this.getRawWhereClause('events', filters, { projectId, startDate, endDate }))
       .groupBy(['origin', 'path'])
       .orderBy('sessions', 'DESC')
       .limit(Math.min(limit ?? MAX_RECORDS_LIMIT, MAX_RECORDS_LIMIT));
@@ -1199,7 +1301,7 @@ export class OverviewService {
         clix.datetime(startDate, 'toDateTime'),
         clix.datetime(endDate, 'toDateTime'),
       ])
-      .rawWhere(this.getRawWhereClause('events', filters));
+      .rawWhere(this.getRawWhereClause('events', filters, { projectId, startDate, endDate }));
   }
 
   async getTopGeneric({
@@ -1328,7 +1430,7 @@ export class OverviewService {
     }
 
     // Step 2: Build time-series query for each top item
-    const where = this.getRawWhereClause('sessions', filters);
+    const where = this.getRawWhereClause('sessions', filters, { projectId, startDate, endDate });
     const timeSeriesSelectColumns: (string | null | undefined | false)[] = [
       `${clix.toStartOf('created_at', interval as any, timezone)} AS date`,
       prefixColumn && `${prefixColumn} as prefix`,
@@ -1469,7 +1571,7 @@ export class OverviewService {
         clix.datetime(startDate, 'toDateTime'),
         clix.datetime(endDate, 'toDateTime'),
       ])
-      .rawWhere(this.getRawWhereClause('events', filters))
+      .rawWhere(this.getRawWhereClause('events', filters, { projectId, startDate, endDate }))
       .orderBy('session_id', 'ASC')
       .orderBy('created_at', 'ASC');
 
@@ -1790,7 +1892,7 @@ export class OverviewService {
     timezone: string;
     excludeEvents?: string[];
   }): Promise<Array<{ name: string; count: number }>> {
-    const where = this.getRawWhereClause('events', filters);
+    const where = this.getRawWhereClause('events', filters, { projectId, startDate, endDate });
     const excludeWhere =
       excludeEvents.length > 0
         ? `name NOT IN (${excludeEvents.map((e) => sqlstring.escape(e)).join(',')})`
@@ -1831,7 +1933,7 @@ export class OverviewService {
     endDate: string;
     timezone: string;
   }): Promise<Array<{ game_id: string; started: number; completed: number }>> {
-    const where = this.getRawWhereClause('events', filters);
+    const where = this.getRawWhereClause('events', filters, { projectId, startDate, endDate });
 
     const query = clix(this.client, timezone)
       .select<{ game_id: string; started: number; completed: number }>([
@@ -1872,7 +1974,7 @@ export class OverviewService {
     endDate: string;
     timezone: string;
   }): Promise<Array<{ href: string; count: number }>> {
-    const where = this.getRawWhereClause('events', filters);
+    const where = this.getRawWhereClause('events', filters, { projectId, startDate, endDate });
     const hrefKey = getSelectPropertyKey('properties.href');
 
     const query = clix(this.client, timezone)
@@ -1915,7 +2017,7 @@ export class OverviewService {
     timezone: string;
     eventName: string;
   }): Promise<Array<{ key: string; count: number }>> {
-    const where = this.getRawWhereClause('events', filters);
+    const where = this.getRawWhereClause('events', filters, { projectId, startDate, endDate });
 
     const query = clix(this.client, timezone)
       .select<{ key: string; count: number }>([
@@ -1957,7 +2059,7 @@ export class OverviewService {
     eventName: string;
     propertyKey: string;
   }): Promise<Array<{ value: string; count: number }>> {
-    const where = this.getRawWhereClause('events', filters);
+    const where = this.getRawWhereClause('events', filters, { projectId, startDate, endDate });
     // Escape the user-supplied key directly into the Map access — getSelectPropertyKey
     // interpolates the key without escaping, so we build the accessor ourselves.
     const valueExpr = `properties[${sqlstring.escape(propertyKey)}]`;
@@ -2005,7 +2107,7 @@ export class OverviewService {
       count: number;
     }>
   > {
-    const where = this.getRawWhereClause('events', filters);
+    const where = this.getRawWhereClause('events', filters, { projectId, startDate, endDate });
 
     // Note: ClickHouse doesn't have built-in lat/lng for countries/regions
     // This would typically require a lookup table or external service

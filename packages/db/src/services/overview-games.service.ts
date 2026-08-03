@@ -159,7 +159,7 @@ class OverviewGamesService {
         clix.datetime(startDate, 'toDateTime'),
         clix.datetime(endDate, 'toDateTime'),
       ])
-      .rawWhere(overviewService.getRawWhereClause('events', filters))
+      .rawWhere(overviewService.getRawWhereClause('events', filters, { projectId, startDate, endDate }))
       .rawWhere(`${GAME_KEY_EXPR} != ''`)
       .groupBy(['game'])
       .orderBy('opens', 'DESC')
@@ -209,7 +209,7 @@ class OverviewGamesService {
         clix.datetime(startDate, 'toDateTime'),
         clix.datetime(endDate, 'toDateTime'),
       ])
-      .rawWhere(overviewService.getRawWhereClause('events', filters))
+      .rawWhere(overviewService.getRawWhereClause('events', filters, { projectId, startDate, endDate }))
       .rawWhere(`${GAME_KEY_EXPR} != ''`)
       .groupBy(['game', 'date'])
       .execute();

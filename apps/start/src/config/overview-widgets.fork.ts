@@ -21,12 +21,10 @@ const RETENTION: OverviewWidgetDef = {
   lazyViewport: true,
 };
 
-// Games — every game side by side (players / sessions / opened / completion /
-// returning / median solve, with a daily-opens sparkline per row). Full width:
-// it carries eight columns plus a chart, and it is the view stakeholders
-// screenshot, so it gets the room rather than being squeezed into a half.
-// Takes the top-devices slot (see reordering below); top-devices moves down to
-// pair with Top geo.
+// Games — every game side by side (opened / completion / returning / median
+// solve, with a daily-opens sparkline per row). Full width, and placed directly
+// under the metric cards: it is the view stakeholders screenshot, so it sits
+// above the Retention section rather than below it.
 const GAMES: OverviewWidgetDef = {
   key: 'games',
   component: OverviewGames,
@@ -55,12 +53,11 @@ const FORK_WIDGETS: OverviewWidgetDef[] = DEFAULT_WIDGETS
     ? { ...w, props: { excludeMetricKeys: HIDDEN_METRIC_KEYS } }
     : w)
   .filter(w => !REMOVED_WIDGET_KEYS.includes(w.key))
-  // insert the retention section right after the metrics widget
-  .flatMap(w => w.key === 'metrics' ? [w, RETENTION] : [w])
-  // Swap Top games into the top-devices slot and move top-devices after
-  // top-events, so Games + Events sit side by side and Devices pairs with Geo.
+  // Games then the retention section, both right after the metrics widget.
+  .flatMap(w => w.key === 'metrics' ? [w, GAMES, RETENTION] : [w])
+  // Move top-devices after top-events, so it pairs with Geo.
   .flatMap(w => {
-    if (w.key === 'top-devices') return [GAMES];
+    if (w.key === 'top-devices') return [];
     // Swap in the drill-down Events widget (event -> property keys -> values).
     if (w.key === 'top-events') {
       return [{ ...w, component: OverviewTopEventsProperties }, TOP_DEVICES];

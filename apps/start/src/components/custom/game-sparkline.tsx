@@ -14,7 +14,10 @@ type GameSparklineProps = {
   values: number[];
   /** Shared across rows so panel heights are comparable, not per-row scaled. */
   domainMax: number;
+  /** chartColors[n].main — the stroke. */
   color: string;
+  /** chartColors[n].translucent — the palette's own fill for that stroke. */
+  fill: string;
   /** Screen-reader description; the drawing itself is decorative. */
   label: string;
   width?: number;
@@ -25,6 +28,7 @@ export function GameSparkline({
   values,
   domainMax,
   color,
+  fill,
   label,
   width = 120,
   height = 28,
@@ -59,8 +63,7 @@ export function GameSparkline({
     >
       <path
         d={`${line} L${width},${height} L0,${height} Z`}
-        fill={color}
-        fillOpacity={0.12}
+        fill={fill}
         stroke="none"
       />
       <path

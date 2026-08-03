@@ -34,7 +34,7 @@ import {
 } from '@/components/overview/overview-widget-table';
 import { useOverviewOptions } from '@/components/overview/useOverviewOptions';
 import { Tooltiper } from '@/components/ui/tooltip';
-import { getChartColor } from '@/utils/theme';
+import { getChartColor, getChartTranslucentColor } from '@/utils/theme';
 import { GameSparkline } from './game-sparkline';
 
 type GameRow = RouterOutputs['overview']['gameBreakdown']['rows'][number];
@@ -59,7 +59,7 @@ function formatSolve(seconds: number): string {
 /** The "Other" row can only carry additive measures — see IGameBreakdownRow. */
 function NotApplicable() {
   return (
-    <Tooltiper content="Not available for the Other row: players and sessions are distinct counts and the median is not additive, so neither can be derived by summing the games folded into it.">
+    <Tooltiper content="Not available for the Other row: a median and a returning rate are not additive, so neither can be derived by summing the games folded into it.">
       <span className="text-muted-foreground">n/a</span>
     </Tooltiper>
   );
@@ -100,11 +100,10 @@ export default function OverviewGames({
   // column header is clicked and "the orange one" would become a different game.
   // The server's order (opens DESC) is the stable assignment.
   const colorByGame = new Map(rows.map((g, i) => [g.game, getChartColor(i)]));
-  // Opens and completes are both counted inside the window, so a puzzle opened
-  // before it and finished inside it lands in the numerator only. That is a real
-  // boundary effect, not a dedup bug — the same one the headline Level
-  // completion metric has — and it is visible mostly on short ranges. It is
-  // never clamped (a clamp would also hide a genuine dedup regression), so the
+  const fillByGame = new Map(
+    rows.map((g, i) => [g.game, getChartTranslucentColor(i)]),
+  );
+  // Never clamped — a clamp would also hide a genuine dedup regression — so the
   // footer explains it on the rare view where it shows up.
   const hasRateOverHundred = rows.some((g) => g.completion_rate > 100);
 
@@ -149,43 +148,16 @@ export default function OverviewGames({
                 width: '120px',
                 // First to hide: the sparkline is the one column whose
                 // information is fully carried by the numbers beside it.
-                responsive: { priority: 8 },
+                responsive: { priority: 6 },
                 render: (g: GameRow) => (
                   <GameSparkline
                     color={colorByGame.get(g.game) ?? getChartColor(0)}
                     domainMax={seriesMax}
+                    fill={fillByGame.get(g.game) ?? getChartTranslucentColor(0)}
                     label={`Daily puzzles opened for ${g.game}`}
                     values={g.series}
                   />
                 ),
-              },
-              {
-                name: 'Players',
-                width: '90px',
-                responsive: { priority: 4 },
-                getSortValue: (g: GameRow) => g.players,
-                render: (g: GameRow) =>
-                  g.is_other ? (
-                    <NotApplicable />
-                  ) : (
-                    <span className="font-semibold">
-                      {number.short(g.players)}
-                    </span>
-                  ),
-              },
-              {
-                name: 'Sessions',
-                width: '96px',
-                responsive: { priority: 5 },
-                getSortValue: (g: GameRow) => g.sessions,
-                render: (g: GameRow) =>
-                  g.is_other ? (
-                    <NotApplicable />
-                  ) : (
-                    <span className="font-semibold">
-                      {number.short(g.sessions)}
-                    </span>
-                  ),
               },
               {
                 name: 'Opened',
@@ -210,7 +182,7 @@ export default function OverviewGames({
               {
                 name: 'Returning',
                 width: '104px',
-                responsive: { priority: 6 },
+                responsive: { priority: 4 },
                 getSortValue: (g: GameRow) => g.returning_rate,
                 render: (g: GameRow) =>
                   g.is_other ? (
@@ -224,7 +196,7 @@ export default function OverviewGames({
               {
                 name: 'Median solve',
                 width: '116px',
-                responsive: { priority: 7 },
+                responsive: { priority: 5 },
                 getSortValue: (g: GameRow) => g.median_solve_s,
                 render: (g: GameRow) =>
                   g.is_other ? (
@@ -241,17 +213,16 @@ export default function OverviewGames({
       </WidgetBody>
       <WidgetFooter>
         <p className="text-muted-foreground text-xs">
-          Players and sessions don't add up to the site totals — a visit that
-          played two games counts under both. Median solve is time to finish a
-          completed puzzle, so it excludes abandoned attempts.
+          Median solve is time to finish a completed puzzle, so it excludes
+          abandoned attempts.
           {nonPlayableCount > 0 &&
             ` ${nonPlayableCount} non-playable ${
               nonPlayableCount === 1 ? 'surface' : 'surfaces'
             } (leaderboards, profiles) excluded.`}
           {hasRateOverHundred &&
-            ' A completion rate above 100% means puzzles were finished in this' +
-              ' period that were opened before it started — expected on short' +
-              ' ranges, and it settles as the range widens.'}
+            ' Completion above 100% means more puzzles were finished than' +
+              ' opened in this view — either they were opened before the range' +
+              ' started, or an active filter matches the two events unevenly.'}
         </p>
       </WidgetFooter>
     </Widget>

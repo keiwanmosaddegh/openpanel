@@ -67,8 +67,6 @@ const MAX_GAME_ROWS_BEFORE_FOLD = MAX_NAMED_GAME_ROWS + 1;
 
 export type IGameBreakdownRow = {
   game: string;
-  players: number;
-  sessions: number;
   opens: number;
   completes: number;
   completion_rate: number;
@@ -77,9 +75,9 @@ export type IGameBreakdownRow = {
   /** Daily puzzle-opens, one entry per day in range, gap-filled. */
   series: number[];
   /**
-   * True for the synthetic "Other" row. Its players/sessions/median are not
-   * derivable by summing per-game rows (distinct counts and a median do not
-   * add up), so the UI must render them as unavailable rather than as zero.
+   * True for the synthetic "Other" row. Its returning rate and median are not
+   * derivable by summing per-game rows, so the UI must render them as
+   * unavailable rather than as zero.
    */
   is_other?: boolean;
   /** Number of games folded into this row. Only set when is_other. */
@@ -129,8 +127,6 @@ class OverviewGamesService {
 
     const ranked = playable.map((t) => ({
       game: t.game,
-      players: t.players,
-      sessions: t.sessions,
       opens: t.opens,
       completes: t.completes,
       // Uncapped on purpose: a rate above 100% would mean the dedup key is
@@ -159,8 +155,6 @@ class OverviewGamesService {
     return clix(this.client, timezone)
       .select<{
         game: string;
-        players: number;
-        sessions: number;
         opens: number;
         completes: number;
         returning_starts: number;
@@ -168,8 +162,6 @@ class OverviewGamesService {
         median_solve_s: number;
       }>([
         `${GAME_KEY_EXPR} AS game`,
-        'uniqExact(device_id) AS players',
-        'uniqExact(session_id) AS sessions',
         `uniqExactIf((${PUZZLE_OPEN_KEY}), name = 'level_started') AS opens`,
         `uniqExactIf((${PUZZLE_OPEN_KEY}), name = 'level_completed') AS completes`,
         `countIf(name = 'session_started' AND days_since_first_visit > 0) AS returning_starts`,
@@ -290,8 +282,6 @@ export function foldTail(ranked: IGameBreakdownRow[]): IGameBreakdownRow[] {
     ...shown,
     {
       game: 'Other',
-      players: 0,
-      sessions: 0,
       opens: otherOpens,
       completes: otherCompletes,
       completion_rate: otherOpens > 0 ? (otherCompletes * 100) / otherOpens : 0,

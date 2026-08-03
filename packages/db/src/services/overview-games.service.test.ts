@@ -11,8 +11,6 @@ function row(
 ): IGameBreakdownRow {
   return {
     game,
-    players: 100,
-    sessions: 110,
     opens: 1000,
     completes: 500,
     completion_rate: 50,
@@ -64,8 +62,8 @@ describe('foldTail', () => {
   it('sums only the additive measures across the folded tail', () => {
     const result = foldTail([
       ...rows(12),
-      row('tail1', { opens: 300, completes: 90, players: 7, sessions: 9 }),
-      row('tail2', { opens: 100, completes: 10, players: 5, sessions: 6 }),
+      row('tail1', { opens: 300, completes: 90, returning_rate: 80 }),
+      row('tail2', { opens: 100, completes: 10, returning_rate: 90 }),
     ]);
     const other = result.at(-1)!;
 
@@ -73,8 +71,6 @@ describe('foldTail', () => {
     expect(other.completes).toBe(100);
     expect(other.completion_rate).toBe(25);
     // 0, not a plausible-looking sum — the UI renders these as "n/a".
-    expect(other.players).toBe(0);
-    expect(other.sessions).toBe(0);
     expect(other.returning_rate).toBe(0);
     expect(other.median_solve_s).toBe(0);
   });

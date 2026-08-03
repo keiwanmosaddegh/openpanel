@@ -13,6 +13,7 @@ import { OverviewRange } from '@/components/overview/overview-range';
 import { OverviewShare } from '@/components/overview/overview-share';
 import { getWidgets } from '@/config/overview-widgets.fork';
 import { createProjectTitle, PAGE_TITLES } from '@/utils/title';
+import { SurfaceFilter } from '@/components/overview/filters/surface-filter';
 
 export const Route = createFileRoute('/_app/$organizationId/$projectId/')({
   component: ProjectDashboard,
@@ -38,6 +39,7 @@ function ProjectDashboard() {
             <div className="flex gap-2">
               <OverviewRange />
               <OverviewInterval />
+              <SurfaceFilter />
               <OverviewFilterButton mode="events" />
               <OverviewAICommand className="hidden w-[280px] md:block" />
             </div>

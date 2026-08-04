@@ -41,13 +41,17 @@ check after ship — the babysit window is a fine time.
 
 Notes on preflight's ⛔ exits and warnings:
 - **Dirty/unpushed tree** → stop and ask; never commit or push on your own initiative.
-- **code-migrations in the release** (exit 2) → read the migration, summarize what it does
-  to the operator, and wait. The operator decides routine flow vs supervised run (§4). What
-  makes a ClickHouse migration heavy is rewriting existing rows — an `UPDATE`, a re-sort, a
-  type change. Adding a MATERIALIZED column is not that: it writes one new column file per
-  part, returns immediately (`mutations_sync` is unset), and old parts compute the value on
-  read until it lands, so correctness never depends on the backfill. Measured 2026-08-03:
-  `MATERIALIZE COLUMN time_seconds` over 103M rows finished in seconds.
+- **New code-migration in the release** (exit 2) → read the migration, summarize what it does
+  to the operator, and wait. The operator decides routine flow vs supervised run (§4), then you
+  resume with `./sh/preflight --migrations-ack` — exit 2 happens *before* typecheck/tests, so
+  the ack re-run is what makes the gates run rather than be skipped. Only an *added* migration
+  trips this: the runner records applied migrations by filename, so editing one prod already ran
+  is inert and preflight lists it as `edited:` without stopping. What makes a ClickHouse
+  migration heavy is rewriting existing rows — an `UPDATE`, a re-sort, a type change. Adding a
+  MATERIALIZED column is not that: it writes one new column file per part, returns immediately
+  (`mutations_sync` is unset), and old parts compute the value on read until it lands, so
+  correctness never depends on the backfill. Measured 2026-08-03: `MATERIALIZE COLUMN
+  time_seconds` over 103M rows finished in seconds.
 - **prisma-only** → proceed; migrations auto-run on op-api start, its 600 s healthcheck
   `start_period` absorbs them, and caddy only routes once api+dashboard are healthy. But
   auto-rollback is disarmed (§2).

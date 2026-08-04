@@ -143,6 +143,16 @@ Write code that is **accessible, performant, type-safe, and maintainable**. Focu
 - Prefer simple conditionals over nested ternary operators
 - Group related code together and separate concerns
 
+### Comments
+
+**Addition by subtraction — replace content, don't layer corrections on top. Prune what you touch.**
+
+- When a comment is wrong or stale, rewrite it. Never append a correction, a caveat, or a "note:" onto prose that is already there
+- If two places explain the same thing, one of them stops explaining it — keep the fullest statement where it is load-bearing, cut the others to a pointer or delete them
+- Don't narrate what the code plainly says
+- State measured facts as measured, with their scope. A figure from one tenant, project, or run is not a property of the system, and writing it as one misleads every later reader
+- A comment that earns its length keeps it. The goal is that a reader learns each fact exactly once, in the right place
+
 ### Security
 
 - Add `rel="noopener"` when using `target="_blank"` on links

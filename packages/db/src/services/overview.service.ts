@@ -110,10 +110,14 @@ const GAME_KEY_FILTER = 'game_key';
 // session_end / link_out are emitted inside the SDK, below the reportEvent
 // chokepoint that stamps it — so a plain column predicate would silently drop
 // them and Top pages, built on screen_view, would return nothing at all. A
-// session, by contrast, carries exactly one surface: over 14d, 54,651 of 54,676
-// tages-anzeiger sessions have a single distinct non-empty value, 24 have two,
-// 3 have none. That is also what makes it legitimate to apply to the
-// session-scoped widgets (bounce rate, duration).
+// session, by contrast, almost always carries ONE surface, which is what makes
+// this legitimate to apply to the session-scoped widgets (bounce rate,
+// duration). Measured on prod over 7d, single-surface share of sessions:
+// tages-anzeiger 99.95%, daily-mail 99.98% — but bild only 94.53% (1,918 of
+// 35,039 sessions span two). So it is a strong tendency, NOT an invariant, and
+// it is tenant-dependent: where sessions do span surfaces, those sessions count
+// under BOTH values and the per-surface views will not sum to the unfiltered
+// total. Do not build anything that assumes they partition.
 const SURFACE_FILTER = 'surface';
 
 /** Query scope needed to bound the surface sub-select. */

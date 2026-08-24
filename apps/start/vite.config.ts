@@ -30,10 +30,14 @@ if (process.env.NITRO) {
 const config = defineConfig({
   plugins,
   ssr: {
-    // @visx/responsive deep-imports 'lodash/debounce' (extensionless),
-    // @nivo/* deep-imports lodash files, and number-flow's 'esm-env' dep is
-    // missed by nitro's dependency tracer — all break Node ESM resolution on
-    // share-page SSR (ERR_MODULE_NOT_FOUND) — bundle them instead.
+    // @visx/responsive deep-imports 'lodash/debounce' (extensionless) and
+    // @nivo/* deep-imports lodash files — both break Node ESM resolution on
+    // share-page SSR (ERR_MODULE_NOT_FOUND), so bundle them instead.
+    //
+    // number-flow and esm-env belong externalized, not here: the Nitro output
+    // keeps them as real packages and apps/start/Dockerfile materializes
+    // `esm-env` from the esm-env-runtime override. Inlining either one strips
+    // esm-env-runtime from the output and that Dockerfile step fails the build.
     noExternal: [
       'react-syntax-highlighter',
       'lowlight',
@@ -41,8 +45,6 @@ const config = defineConfig({
       /@nivo\//,
       /@visx\//,
       'lodash',
-      /number-flow/,
-      'esm-env',
     ],
   },
 });

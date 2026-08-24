@@ -16,6 +16,7 @@ import { clix, type Query } from '../clickhouse/query-builder';
 import type { EventMeta, Prisma } from '../prisma-client';
 import { db } from '../prisma-client';
 import { createSqlBuilder, type SqlBuilderObject } from '../sql-builder';
+import { resolveMaxLookbackDays } from './lookback';
 import { getEventFiltersWhereClause } from './chart.service';
 import { buildFilterWhere } from './filter-where.service';
 import type { IServiceProfile, IServiceUpsertProfile } from './profile.service';
@@ -499,7 +500,11 @@ export async function getEventList(options: GetEventListOptions) {
   } = options;
   const { sb, getSql, join } = createSqlBuilder();
 
-  const MAX_DATE_INTERVAL_IN_DAYS = 365 * 5;
+  // Deployment-tunable ceiling for the empty-result lookback (see lookback.ts).
+  const MAX_DATE_INTERVAL_IN_DAYS = resolveMaxLookbackDays(
+    'EVENT_LIST_MAX_LOOKBACK_DAYS',
+    365 * 5,
+  );
   // Cap the date interval to prevent infinity
   const safeDateIntervalInDays = Math.min(
     dateIntervalInDays,
@@ -1246,14 +1251,23 @@ export async function listEventPropertiesCore(input: {
   columns: readonly string[];
   properties: Array<{ property_key: string; event_name: string }>;
 }> {
+  // GROUP BY rather than DISTINCT: both return the same set of
+  // (property_key, name) pairs, but a multi-column DISTINCT cannot be matched
+  // against the epv_keys aggregating projection, so it degrades to a full scan
+  // of the project's MV slice. `name` is a tie-breaker for the ORDER BY —
+  // without it the LIMIT slices an arbitrary subset of the rows sharing a
+  // property_key, which is also what made the two spellings return different
+  // windows.
   const builder = clix(ch)
     .select<{ property_key: string; event_name: string }>([
-      'distinct property_key',
+      'property_key',
       'name as event_name',
     ])
     .from(TABLE_NAMES.event_property_values_mv)
     .where('project_id', '=', input.projectId)
+    .groupBy(['property_key', 'name'])
     .orderBy('property_key', 'ASC')
+    .orderBy('name', 'ASC')
     .limit(500);
 
   if (input.eventName) {

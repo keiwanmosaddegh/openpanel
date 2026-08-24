@@ -6,6 +6,7 @@ import { ColumnCreatedAt } from '@/components/column-created-at';
 import { ProjectLink } from '@/components/links';
 import { ProfileAvatar } from '@/components/profiles/profile-avatar';
 import { SerieIcon } from '@/components/report-chart/common/serie-icon';
+import { useNumber } from '@/hooks/use-numer-formatter';
 import { getProfileName } from '@/utils/getters';
 
 function formatDuration(milliseconds: number): string {
@@ -26,6 +27,7 @@ function formatDuration(milliseconds: number): string {
 }
 
 export function useColumns() {
+  const number = useNumber();
   const columns: ColumnDef<IServiceSession>[] = [
     {
       accessorKey: 'createdAt',
@@ -46,7 +48,8 @@ export function useColumns() {
           <div className="row items-center gap-2">
             <ProjectLink
               className="font-medium"
-              href={`/sessions/${session.id}`}
+              to="/sessions/$sessionId"
+              params={{ sessionId: session.id }}
               title={session.id}
             >
               {session.id.slice(0, 8)}...
@@ -55,7 +58,9 @@ export function useColumns() {
               <ProjectLink
                 aria-label="View replay"
                 className="text-muted-foreground hover:text-foreground"
-                href={`/sessions/${session.id}#replay`}
+                to="/sessions/$sessionId"
+                params={{ sessionId: session.id }}
+                hash="replay"
                 title="View replay"
               >
                 <Video className="size-4" />
@@ -75,7 +80,8 @@ export function useColumns() {
           return (
             <ProjectLink
               className="row items-center gap-2 font-medium hover:underline"
-              href={`/profiles/${encodeURIComponent(session.profile.id)}`}
+              to="/profiles/$profileId"
+              params={{ profileId: session.profile.id }}
             >
               <ProfileAvatar size="sm" {...session.profile} />
               {getProfileName(session.profile)}
@@ -85,7 +91,8 @@ export function useColumns() {
         return (
           <ProjectLink
             className="font-medium font-mono"
-            href={`/profiles/${encodeURIComponent(session.profileId)}`}
+            to="/profiles/$profileId"
+            params={{ profileId: session.profileId }}
           >
             {session.profileId}
           </ProjectLink>
@@ -258,7 +265,7 @@ export function useColumns() {
         const session = row.original;
         return session.revenue > 0 ? (
           <div className="font-medium text-green-600">
-            ${session.revenue.toFixed(2)}
+            {number.currency(session.revenue / 100)}
           </div>
         ) : (
           <div className="text-muted-foreground">-</div>

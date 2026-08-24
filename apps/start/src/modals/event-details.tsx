@@ -233,7 +233,8 @@ function EventDetailsContent({ id, createdAt, projectId }: Props) {
         {profile && (
           <ProjectLink
             className="card col gap-2 p-4 py-2 hover:bg-def-100"
-            href={`/profiles/${encodeURIComponent(profile.id)}`}
+            to="/profiles/$profileId"
+            params={{ profileId: profile.id }}
             onClick={() => popModal()}
           >
             <div className="row items-center justify-between gap-2">
@@ -286,6 +287,7 @@ function EventDetailsContent({ id, createdAt, projectId }: Props) {
             {propertiesMode === 'table' && (
             <KeyValueGrid
               columns={1}
+              copyable
               data={properties}
               onItemClick={(item) => {
                 popModal();
@@ -310,6 +312,7 @@ function EventDetailsContent({ id, createdAt, projectId }: Props) {
           </div>
           <KeyValueGrid
             columns={1}
+            copyable
             data={data}
             onItemClick={(item) => {
               const isFilterable = item.value && (filterable as any)[item.name];

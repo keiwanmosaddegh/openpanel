@@ -25,7 +25,8 @@ const ProfileItem = ({ profile }: { profile: any }) => {
   return (
     <ProjectLink
       preload={false}
-      href={`/profiles/${encodeURIComponent(profile.id)}`}
+      to="/profiles/$profileId"
+      params={{ profileId: profile.id }}
       title={getProfileName(profile, false)}
       className="col gap-2 rounded-lg border p-2 bg-card"
       onClick={(e) => {
@@ -149,6 +150,39 @@ function ProfileList({ profiles }: { profiles: any[] }) {
   );
 }
 
+/**
+ * Renders the query's outcome. A failed request must not look like an empty
+ * result — `data ?? []` used to render backend errors as "No users found",
+ * which hid real failures (e.g. a funnel breakdown whose SQL didn't compile).
+ */
+function ProfileListState({
+  query,
+}: {
+  query: { isLoading: boolean; isError: boolean; data?: any[] };
+}) {
+  if (query.isLoading) {
+    return (
+      <div className="flex items-center justify-center py-8">
+        <div className="text-muted-foreground">Loading users...</div>
+      </div>
+    );
+  }
+
+  if (query.isError) {
+    return (
+      <div className="col items-center justify-center gap-1 py-8 text-center">
+        <div className="font-medium">Could not load users</div>
+        <div className="text-muted-foreground text-sm">
+          Something went wrong running this query. Try again, or adjust the
+          report.
+        </div>
+      </div>
+    );
+  }
+
+  return <ProfileList profiles={query.data ?? []} />;
+}
+
 // Chart-specific props and component
 interface ChartUsersViewProps {
   chartData: IChartData;
@@ -213,8 +247,6 @@ function ChartUsersView({ chartData, report, date }: ChartUsersViewProps) {
     ),
   );
 
-  const profiles = profilesQuery.data ?? [];
-
   return (
     <ScrollableModal
       header={
@@ -273,13 +305,7 @@ function ChartUsersView({ chartData, report, date }: ChartUsersViewProps) {
       }
     >
       <div className="col">
-        {profilesQuery.isLoading ? (
-          <div className="flex items-center justify-center py-8">
-            <div className="text-muted-foreground">Loading users...</div>
-          </div>
-        ) : (
-          <ProfileList profiles={profiles} />
-        )}
+        <ProfileListState query={profilesQuery} />
       </div>
     </ScrollableModal>
   );
@@ -330,7 +356,6 @@ function FunnelUsersView({ report, stepIndex, breakdownValues }: FunnelUsersView
     ),
   );
 
-  const profiles = profilesQuery.data ?? [];
   const isLastStep = stepIndex === report.series.length - 1;
 
   return (
@@ -377,13 +402,7 @@ function FunnelUsersView({ report, stepIndex, breakdownValues }: FunnelUsersView
       }
     >
       <div className="flex flex-col gap-4">
-        {profilesQuery.isLoading ? (
-          <div className="flex items-center justify-center py-8">
-            <div className="text-muted-foreground">Loading users...</div>
-          </div>
-        ) : (
-          <ProfileList profiles={profiles} />
-        )}
+        <ProfileListState query={profilesQuery} />
       </div>
     </ScrollableModal>
   );

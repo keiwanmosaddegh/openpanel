@@ -6,6 +6,7 @@ import {
   clix,
   conversionService,
   createSqlBuilder,
+  EMPTY_BREAKDOWN_LABEL,
   formatClickhouseDate,
   funnelService,
   getChartPrevStartEndDate,
@@ -13,6 +14,7 @@ import {
   getEventFiltersWhereClause,
   getEventMetasCached,
   getGroupPropertySelect,
+  getProfilePropertyKeysCached,
   getProfilePropertySelect,
   getProfilesCached,
   getReportById,
@@ -50,6 +52,33 @@ import {
 } from '../trpc';
 
 const cacher = cacheMiddleware(60);
+
+/**
+ * Cap on distinct event property keys returned to the picker. Projects in the
+ * 8k range exist, so the previous 10k was reachable in normal use.
+ */
+const EVENT_PROPERTY_KEY_LIMIT = 50_000;
+
+/**
+ * Cap on distinct values returned per event property to the filter
+ * autocomplete. High-cardinality keys (ids, urls, session tokens) can hold
+ * millions of distinct values — returning them all is useless for a picker
+ * and heavy for ClickHouse and the browser alike. Most recent values win.
+ * Env-tunable via EVENT_PROPERTY_VALUE_AUTOCOMPLETE_LIMIT (positive
+ * integer; invalid values keep the default).
+ */
+const EVENT_PROPERTY_VALUE_AUTOCOMPLETE_LIMIT_RAW =
+  process.env.EVENT_PROPERTY_VALUE_AUTOCOMPLETE_LIMIT;
+const EVENT_PROPERTY_VALUE_AUTOCOMPLETE_LIMIT_PARSED =
+  EVENT_PROPERTY_VALUE_AUTOCOMPLETE_LIMIT_RAW &&
+  /^\d+$/.test(EVENT_PROPERTY_VALUE_AUTOCOMPLETE_LIMIT_RAW)
+    ? Number(EVENT_PROPERTY_VALUE_AUTOCOMPLETE_LIMIT_RAW)
+    : Number.NaN;
+const EVENT_PROPERTY_VALUE_AUTOCOMPLETE_LIMIT =
+  Number.isSafeInteger(EVENT_PROPERTY_VALUE_AUTOCOMPLETE_LIMIT_PARSED) &&
+  EVENT_PROPERTY_VALUE_AUTOCOMPLETE_LIMIT_PARSED > 0
+    ? EVENT_PROPERTY_VALUE_AUTOCOMPLETE_LIMIT_PARSED
+    : 500;
 
 const chartProcedure = publicProcedure.use(
   async ({ ctx, next, getRawInput }) => {
@@ -225,6 +254,10 @@ export const chartRouter = createTRPCRouter({
     }),
 
   properties: protectedProcedure
+    // Aggregating every profile's property keys costs more than the old
+    // 10k-row sample. It's still sub-second on millions of profiles, and this
+    // list barely moves, so a short cache absorbs it.
+    .use(cacheMiddleware(60))
     .input(
       z.object({
         event: z.string().optional(),
@@ -232,21 +265,9 @@ export const chartRouter = createTRPCRouter({
       })
     )
     .query(async ({ input: { projectId, event } }) => {
-      const profiles = await clix(ch, 'UTC')
-        .select<Pick<IServiceProfile, 'properties'>>(['properties'])
-        .from(TABLE_NAMES.profiles)
-        .where('project_id', '=', projectId)
-        .where('is_external', '=', true)
-        .limit(10_000)
-        .execute();
-
-      const profileProperties = [
-        ...new Set(
-          profiles.flatMap((p) =>
-            Object.keys(p.properties).map((k) => `profile.properties.${k}`)
-          )
-        ),
-      ];
+      const profileProperties = (
+        await getProfilePropertyKeysCached(projectId)
+      ).map((key) => `profile.properties.${key}`);
 
       const query = clix(ch)
         .select<{ property_key: string; created_at: string }>([
@@ -256,9 +277,14 @@ export const chartRouter = createTRPCRouter({
         .from(TABLE_NAMES.event_property_values_mv)
         .where('project_id', '=', projectId)
         .groupBy(['property_key'])
-        .orderBy('length(property_key)', 'ASC')
+        // Order by recency, not by key length. The cap has to drop *something*
+        // on projects with very many distinct keys, and dropping the longest
+        // keys first meant losing the most descriptive ones. `property_key`
+        // breaks ties so the cap can't cut an arbitrary side of a tied group —
+        // an unstable list is the bug this whole change is about.
         .orderBy('created_at', 'DESC')
-        .limit(10_000);
+        .orderBy('property_key', 'ASC')
+        .limit(EVENT_PROPERTY_KEY_LIMIT);
 
       if (event && event !== '*') {
         query.where('name', '=', event);
@@ -339,7 +365,11 @@ export const chartRouter = createTRPCRouter({
           .where('project_id', '=', projectId)
           .where('property_key', '=', property.replace(/^properties\./, ''))
           .groupBy(['property_value'])
-          .orderBy('created_at', 'DESC');
+          // Recency + key tie-break for a stable list under the cap — same
+          // rationale as the key picker above.
+          .orderBy('created_at', 'DESC')
+          .orderBy('property_value', 'ASC')
+          .limit(EVENT_PROPERTY_VALUE_AUTOCOMPLETE_LIMIT);
 
         if (event && event !== '*') {
           query.where('name', '=', event);
@@ -823,7 +853,7 @@ export const chartRouter = createTRPCRouter({
         showDropoffs = false,
         funnelWindow,
         funnelGroup,
-        breakdowns = [],
+        breakdowns: inputBreakdowns = [],
         breakdownValues = [],
       } = input;
 
@@ -832,94 +862,26 @@ export const chartRouter = createTRPCRouter({
       // stepIndex is 0-based, but level is 1-based, so we need level >= stepIndex + 1
       const targetLevel = stepIndex + 1;
 
-      const eventSeries = onlyReportEvents(series);
-
-      if (eventSeries.length === 0) {
-        throw new Error('At least one event series is required');
-      }
-
-      const funnelWindowSeconds = (funnelWindow || 24) * 3600;
-      const funnelWindowMilliseconds = funnelWindowSeconds * 1000;
-
-      // Get the grouping strategy (profile_id or session_id)
-      const group = funnelService.getFunnelGroup(funnelGroup);
-
-      const anyFilterOnGroup = (eventSeries as IChartEvent[]).some((e) =>
-        e.filters?.some((f) => f.name.startsWith('group.'))
-      );
-      const anyBreakdownOnGroup = breakdowns.some((b) =>
-        b.name.startsWith('group.')
-      );
-      const needsGroupArrayJoin = anyFilterOnGroup || anyBreakdownOnGroup;
-
-      // Breakdown selects/groupBy so we can filter by specific breakdown values
-      const breakdownSelects = breakdowns.map(
-        (b, index) => `${getSelectPropertyKey(b.name, projectId)} as b_${index}`
-      );
-      const breakdownGroupBy = breakdowns.map((_, index) => `b_${index}`);
-
-      // Create funnel CTE using funnel service
-      const funnelCte = funnelService.buildFunnelCte({
+      // Reuse the chart's own funnel builder rather than re-deriving the CTE
+      // here. The two copies used to drift — breakdown expressions referencing
+      // a `profile` or `cohort_<id>` alias whose join this side never added,
+      // which failed with UNKNOWN_IDENTIFIER and surfaced as "No users found".
+      const { query, breakdowns } = await funnelService.buildFunnelBase({
         projectId,
         startDate,
         endDate,
-        eventSeries: eventSeries as IChartEvent[],
-        funnelWindowMilliseconds,
+        series,
+        breakdowns: inputBreakdowns,
+        funnelWindow,
+        funnelGroup,
         timezone,
-        additionalSelects: breakdownSelects,
-        additionalGroupBy: breakdownGroupBy,
-        group,
       });
 
-      // Profile JOIN must cover both profile filters AND profile breakdowns —
-      // breakdownSelects reference `profile.properties[...]` etc. via
-      // getSelectPropertyKey, so the alias has to exist in scope even when
-      // no filter touches the profiles table. Mirrors the same guard in
-      // funnelService.getFunnel.
-      const profileFilters = funnelService.getProfileFilters(
-        eventSeries as IChartEvent[]
-      );
-      const profileBreakdownNames = breakdowns
-        .filter((b) => b.name.startsWith('profile.'))
-        .map((b) => b.name.replace('profile.', ''));
-      if (profileFilters.length > 0 || profileBreakdownNames.length > 0) {
-        const fieldsToSelect = uniq([
-          ...profileFilters.map((f) => f.split('.')[0]!),
-          ...profileBreakdownNames.map((f) => f.split('.')[0]!),
-        ]).join(', ');
-        funnelCte.leftJoin(
-          `(SELECT id, ${fieldsToSelect} FROM ${TABLE_NAMES.profiles} FINAL WHERE project_id = ${sqlstring.escape(projectId)}) as profile`,
-          'profile.id = events.profile_id'
-        );
-      }
-
-      if (needsGroupArrayJoin) {
-        funnelCte.rawJoin('ARRAY JOIN groups AS _group_id');
-        funnelCte.rawJoin('LEFT ANY JOIN _g ON _g.id = _group_id');
-      }
-
-      // Build main query
-      const query = clix(ch, timezone);
-      if (needsGroupArrayJoin) {
-        query.with(
-          '_g',
-          `SELECT id, name, type, properties FROM ${TABLE_NAMES.groups} FINAL WHERE project_id = ${sqlstring.escape(projectId)}`
-        );
-      }
-      query.with('session_funnel', funnelCte);
-
-      if (group === 'profile_id') {
-        const breakdownAggregates =
-          breakdowns.length > 0
-            ? `, ${breakdowns.map((_, index) => `any(b_${index}) AS b_${index}`).join(', ')}`
-            : '';
-        query.with(
-          'funnel',
-          `SELECT profile_id, max(level) AS level${breakdownAggregates} FROM (SELECT * FROM session_funnel WHERE level != 0) GROUP BY profile_id`
-        );
-      } else {
-        query.with('funnel', 'SELECT * FROM session_funnel WHERE level != 0');
-      }
+      // Same shape as the chart's `funnel` CTE: windowFunnel is already
+      // computed per primary key (with breakdowns attributed at the entry
+      // step, so each group carries one deterministic b_N value), so drop
+      // level=0 and select distinct profiles.
+      query.with('funnel', 'SELECT * FROM session_funnel WHERE level != 0');
 
       query.select(['DISTINCT profile_id']).from('funnel');
 
@@ -929,11 +891,26 @@ export const chartRouter = createTRPCRouter({
         query.where('level', '>=', targetLevel);
       }
 
-      // Filter by specific breakdown values when a breakdown row was clicked
+      // Filter by specific breakdown values when a breakdown row was clicked.
+      // The clicked row carries DISPLAY labels — trimmed, with empty/null
+      // shown as EMPTY_BREAKDOWN_LABEL (see toSeries/normalizeBreakdownValue)
+      // — so match against the same normalization, not the raw column, or
+      // "Not set" rows and values with stray whitespace return no users.
+      // toString/ifNull make the comparison safe for numeric breakdown
+      // columns (trim on a number is a type error) and for Nullable ones
+      // (trim(NULL) = '' is NULL, never true).
       breakdowns.forEach((_, index) => {
         const value = breakdownValues[index];
-        if (value !== undefined) {
-          query.where(`b_${index}`, '=', value);
+        if (value === undefined) {
+          return;
+        }
+        const normalized = `trim(ifNull(toString(b_${index}), ''))`;
+        if (value === EMPTY_BREAKDOWN_LABEL) {
+          query.rawWhere(
+            `(${normalized} = '' OR ${normalized} = ${sqlstring.escape(EMPTY_BREAKDOWN_LABEL)})`
+          );
+        } else {
+          query.rawWhere(`${normalized} = ${sqlstring.escape(value)}`);
         }
       });
 

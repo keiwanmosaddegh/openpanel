@@ -5,41 +5,50 @@ import { fileURLToPath } from 'node:url';
 import type { ReaderModel } from '@maxmind/geoip2-node';
 import { Reader } from '@maxmind/geoip2-node';
 import { LRUCache } from 'lru-cache';
+import datacenterAsns from './datacenter-asns';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const filename = 'GeoLite2-City.mmdb';
-// From api or worker package
-const dbPath = path.join(__dirname, `../../../packages/geo/${filename}`);
-// From local package
-const dbPathLocal = path.join(__dirname, `../${filename}`);
-
-// Singleton promise - initialized once, awaited on every call
-let readerPromise: Promise<ReaderModel | null> | null = null;
-
-async function loadDatabase(): Promise<ReaderModel | null> {
+// Resolve a bundled `.mmdb` file, trying the api/worker layout first and the
+// local package layout second (mirrors how the file ships via `pnpm codegen`).
+async function loadDatabase(filename: string): Promise<ReaderModel | null> {
+  // From api or worker package
+  const dbPath = path.join(__dirname, `../../../packages/geo/${filename}`);
+  // From local package
+  const dbPathLocal = path.join(__dirname, `../${filename}`);
   try {
     const dbBuffer = await readFile(dbPath);
-    console.log('GeoLite2-City.mmdb loaded (dist)', dbPath);
+    console.log(`${filename} loaded (dist)`, dbPath);
     return Reader.openBuffer(dbBuffer);
   } catch {
     try {
       const dbBuffer = await readFile(dbPathLocal);
-      console.log('GeoLite2-City.mmdb loaded (local)', dbPathLocal);
+      console.log(`${filename} loaded (local)`, dbPathLocal);
       return Reader.openBuffer(dbBuffer);
     } catch {
-      console.error('GeoLite2-City.mmdb not found', { dbPath, dbPathLocal });
+      console.error(`${filename} not found`, { dbPath, dbPathLocal });
       return null;
     }
   }
 }
 
+// Singleton promises - initialized once, awaited on every call
+let readerPromise: Promise<ReaderModel | null> | null = null;
+let asnReaderPromise: Promise<ReaderModel | null> | null = null;
+
 function getReader(): Promise<ReaderModel | null> {
   if (!readerPromise) {
-    readerPromise = loadDatabase();
+    readerPromise = loadDatabase('GeoLite2-City.mmdb');
   }
   return readerPromise;
+}
+
+function getAsnReader(): Promise<ReaderModel | null> {
+  if (!asnReaderPromise) {
+    asnReaderPromise = loadDatabase('GeoLite2-ASN.mmdb');
+  }
+  return asnReaderPromise;
 }
 
 export interface GeoLocation {
@@ -89,7 +98,64 @@ export async function getGeoLocation(ip?: string): Promise<GeoLocation> {
     };
     cache.set(ip, res);
     return res;
-  } catch (error) {
+  } catch {
+    // Cache negative lookups too — the reader throws AddressNotFoundError for
+    // IPs absent from the db, and re-throwing on every event is wasted work.
+    cache.set(ip, DEFAULT_GEO);
     return DEFAULT_GEO;
+  }
+}
+
+export interface AsnInfo {
+  asn: number | undefined;
+  org: string | undefined;
+  // True when the ASN belongs to a datacenter / hosting provider (see
+  // `datacenter-asns.ts`). Such traffic is unlikely to be a real end user.
+  isHosting: boolean;
+}
+
+const DEFAULT_ASN: AsnInfo = {
+  asn: undefined,
+  org: undefined,
+  isHosting: false,
+};
+
+const datacenterAsnSet = new Set<number>(datacenterAsns);
+
+const asnCache = new LRUCache<string, AsnInfo>({
+  max: 1000,
+  ttl: 1000 * 60 * 5,
+  ttlAutopurge: true,
+});
+
+// Resolve the Autonomous System an IP belongs to and whether it is a known
+// datacenter / hosting network. Used to flag (not block) likely-bot traffic.
+export async function getAsnInfo(ip?: string): Promise<AsnInfo> {
+  if (!ip || ignore.includes(ip)) {
+    return DEFAULT_ASN;
+  }
+
+  const cached = asnCache.get(ip);
+  if (cached) {
+    return cached;
+  }
+
+  const reader = await getAsnReader();
+
+  try {
+    const response = reader?.asn(ip);
+    const asn = response?.autonomousSystemNumber;
+    const res: AsnInfo = {
+      asn,
+      org: response?.autonomousSystemOrganization,
+      isHosting: asn !== undefined && datacenterAsnSet.has(asn),
+    };
+    asnCache.set(ip, res);
+    return res;
+  } catch {
+    // Cache negative lookups too — the reader throws AddressNotFoundError for
+    // IPs absent from the db, and re-throwing on every event is wasted work.
+    asnCache.set(ip, DEFAULT_ASN);
+    return DEFAULT_ASN;
   }
 }

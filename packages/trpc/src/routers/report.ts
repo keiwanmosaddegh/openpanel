@@ -9,7 +9,11 @@ import {
 import { zReport } from '@openpanel/validation';
 
 import { getProjectAccess } from '../access';
-import { TRPCForbiddenError, TRPCNotFoundError } from '../errors';
+import {
+  TRPCBadRequestError,
+  TRPCForbiddenError,
+  TRPCNotFoundError,
+} from '../errors';
 import { createTRPCRouter, protectedProcedure } from '../trpc';
 
 export const reportRouter = createTRPCRouter({
@@ -65,7 +69,7 @@ export const reportRouter = createTRPCRouter({
           formula: report.formula,
           previous: report.previous ?? false,
           unit: report.unit,
-          metric: report.metric === 'count' ? 'sum' : report.metric,
+          metric: report.metric,
           options: report.options,
           visibleSeries: report.visibleSeries ?? [],
           startDate: report.range === 'custom' ? report.startDate : null,
@@ -112,13 +116,76 @@ export const reportRouter = createTRPCRouter({
           formula: report.formula,
           previous: report.previous ?? false,
           unit: report.unit,
-          metric: report.metric === 'count' ? 'sum' : report.metric,
+          metric: report.metric,
           options: report.options,
           visibleSeries: report.visibleSeries ?? [],
           startDate: report.range === 'custom' ? report.startDate : null,
           endDate: report.range === 'custom' ? report.endDate : null,
         },
       });
+    }),
+  move: protectedProcedure
+    .input(
+      z.object({
+        reportId: z.string(),
+        dashboardId: z.string(),
+      }),
+    )
+    .mutation(async ({ input: { reportId, dashboardId }, ctx }) => {
+      const report = await db.report.findUniqueOrThrow({
+        where: {
+          id: reportId,
+        },
+      });
+
+      const access = await getProjectAccess({
+        userId: ctx.session.userId,
+        projectId: report.projectId,
+      });
+
+      if (!access) {
+        throw new TRPCForbiddenError('You do not have access to this project');
+      }
+
+      if (report.dashboardId === dashboardId) {
+        throw new TRPCBadRequestError('Report is already on this dashboard');
+      }
+
+      const dashboard = await db.dashboard.findUniqueOrThrow({
+        where: {
+          id: dashboardId,
+        },
+      });
+
+      // A report keeps its own projectId and that is what powers the chart
+      // queries, public shares included. Moving it to a dashboard in another
+      // project would expose the source project through the target project.
+      if (dashboard.projectId !== report.projectId) {
+        throw new TRPCBadRequestError(
+          'You can only move a report to a dashboard in the same project',
+        );
+      }
+
+      const [, moved] = await db.$transaction([
+        // The layout belongs to the report, not the dashboard. Keeping it would
+        // drop the report on top of whatever already sits at those coordinates
+        // in the target dashboard.
+        db.reportLayout.deleteMany({
+          where: {
+            reportId,
+          },
+        }),
+        db.report.update({
+          where: {
+            id: reportId,
+          },
+          data: {
+            dashboardId,
+          },
+        }),
+      ]);
+
+      return moved;
     }),
   delete: protectedProcedure
     .input(
@@ -290,10 +357,19 @@ export const reportRouter = createTRPCRouter({
         throw new TRPCForbiddenError('You do not have access to this project');
       }
 
+      // The access check above only proves the caller owns `projectId`. Bind
+      // the caller-supplied `dashboardId` to that project as well, otherwise a
+      // dashboard from another organization can be read through this handler.
+      const dashboard = await getDashboardById(dashboardId, projectId);
+      if (!dashboard) {
+        throw new TRPCNotFoundError('Dashboard not found');
+      }
+
       return db.reportLayout.findMany({
         where: {
           report: {
             dashboardId: dashboardId,
+            projectId,
           },
         },
         include: {
@@ -318,11 +394,19 @@ export const reportRouter = createTRPCRouter({
         throw new TRPCForbiddenError('You do not have access to this project');
       }
 
+      // Same as `getLayouts`: bind the dashboard to the access-checked project
+      // before deleting anything, so a foreign dashboard cannot be wiped.
+      const dashboard = await getDashboardById(dashboardId, projectId);
+      if (!dashboard) {
+        throw new TRPCNotFoundError('Dashboard not found');
+      }
+
       // Delete all layout data for reports in this dashboard
       return db.reportLayout.deleteMany({
         where: {
           report: {
             dashboardId: dashboardId,
+            projectId,
           },
         },
       });

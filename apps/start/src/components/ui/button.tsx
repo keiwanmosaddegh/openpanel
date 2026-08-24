@@ -98,6 +98,28 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     // Determine spinner size based on button size
     const spinnerSize = size === 'lg' ? 'md' : size === 'icon' ? 'sm' : 'sm';
 
+    // With `asChild`, Radix's <Slot> merges props onto a single child element
+    // and calls React.Children.only. Injecting a spinner/icon as extra siblings
+    // would crash ("expected to receive a single React element child"), so the
+    // asChild path forwards only the child and skips those adornments.
+    if (asChild) {
+      return (
+        <Comp
+          className={cn(
+            buttonVariants({ variant, size, className }),
+            fixHeight({ autoHeight, size }),
+            loadingAbsolute && 'relative'
+          )}
+          disabled={loading || disabled}
+          ref={ref}
+          type={type}
+          {...props}
+        >
+          {children}
+        </Comp>
+      );
+    }
+
     return (
       <Comp
         className={cn(

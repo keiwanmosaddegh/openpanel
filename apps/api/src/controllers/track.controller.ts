@@ -10,7 +10,12 @@ import {
   sessionBuffer,
   upsertProfile,
 } from '@openpanel/db';
-import { type GeoLocation, getGeoLocation } from '@openpanel/geo';
+import {
+  type AsnInfo,
+  type GeoLocation,
+  getAsnInfo,
+  getGeoLocation,
+} from '@openpanel/geo';
 import {
   type EventsQueuePayloadIncomingEvent,
   getEventsGroupQueueShard,
@@ -29,6 +34,7 @@ import type {
 } from '@openpanel/validation';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { assocPath, pathOr, pick } from 'ramda';
+import { applyBotSuspicion, stripBotProperties } from '@/bots/suspicion';
 import { HttpError } from '@/utils/errors';
 import { getDeviceId } from '@/utils/ids';
 
@@ -139,12 +145,18 @@ interface TrackContext {
   projectId: string;
   ip: string;
   ua?: string;
+  // Whitelisted subset (getStringHeaders) that ships with the queue payload.
   headers: Record<string, string | undefined>;
+  // Full raw request headers — bot signals need sec-ch-ua / sec-fetch-* /
+  // accept-language, which the whitelist above deliberately drops.
+  requestHeaders: FastifyRequest['headers'];
+  clientSecretAuth: boolean;
   timestamp: { value: number; isFromPast: boolean };
   identity?: IIdentifyPayload;
   deviceId: string;
   sessionId: string;
   geo: GeoLocation;
+  asnInfo: AsnInfo;
 }
 
 async function buildContext(
@@ -175,8 +187,14 @@ async function buildContext(
 
   const overrideDeviceId = getOverrideDeviceId(validatedBody);
 
-  // Get geo location (needed for track and identify)
-  const [geo, salts] = await Promise.all([getGeoLocation(ip), getSalts()]);
+  // Get geo location (needed for track and identify) + ASN (bot detection).
+  // Both hit the same MaxMind readers keyed on the same IP and are cached, so
+  // resolving them together adds no meaningful latency.
+  const [geo, asnInfo, salts] = await Promise.all([
+    getGeoLocation(ip),
+    getAsnInfo(ip),
+    getSalts(),
+  ]);
 
   const deviceIdResult = await getDeviceId({
     projectId,
@@ -192,6 +210,8 @@ async function buildContext(
     ip,
     ua,
     headers,
+    requestHeaders: request.headers,
+    clientSecretAuth: request.clientSecretAuth ?? false,
     timestamp: {
       value: timestamp.timestamp,
       isFromPast: timestamp.isTimestampFromThePast,
@@ -200,6 +220,7 @@ async function buildContext(
     deviceId: deviceIdResult.deviceId,
     sessionId: deviceIdResult.sessionId,
     geo,
+    asnInfo,
   };
 }
 
@@ -210,6 +231,13 @@ async function handleTrack(
   const { projectId, deviceId, geo, headers, timestamp, sessionId } = context;
 
   const uaInfo = parseUserAgent(headers['user-agent'], payload.properties);
+  // Mark (never block) likely bot traffic with __bot / __bot_reasons props.
+  payload.properties = applyBotSuspicion(payload.properties, {
+    asnInfo: context.asnInfo,
+    headers: context.requestHeaders,
+    clientSecretAuth: context.clientSecretAuth,
+    isServer: uaInfo.isServer,
+  });
   const groupId = uaInfo.isServer
     ? payload.profileId
       ? `${projectId}:${payload.profileId}`
@@ -260,6 +288,8 @@ async function handleIdentify(
   context: TrackContext
 ): Promise<void> {
   const { projectId, geo, ua } = context;
+  // Profiles must not carry forged bot verdicts either.
+  stripBotProperties(payload.properties);
   const uaInfo = parseUserAgent(ua, payload.properties);
   await upsertProfile({
     ...payload,

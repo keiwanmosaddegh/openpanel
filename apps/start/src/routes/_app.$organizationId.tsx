@@ -155,7 +155,8 @@ function Component() {
         </Alert>
       )}
       {organization.subscriptionPeriodEventsCountExceededAt &&
-        organization.isActive && (
+        organization.isActive &&
+        organization.isExceeded && (
           <Alert
             title="Events limit exceeded"
             description={`Your subscription has exceeded the limit on ${format(organization.subscriptionPeriodEventsCountExceededAt, 'PPP')}`}

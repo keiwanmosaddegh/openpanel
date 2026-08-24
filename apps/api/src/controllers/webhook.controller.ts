@@ -266,8 +266,6 @@ async function syncSubscriptionToOrg(
         ? data.currentPeriodEnd
         : data.canceledAt
       : data.currentPeriodEnd,
-    subscriptionCreatedByUserId:
-      metadata.userId ?? organization.subscriptionCreatedByUserId,
     subscriptionInterval: data.recurringInterval,
     subscriptionPeriodEventsLimit,
     subscriptionPeriodEventsCountExceededAt:

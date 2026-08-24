@@ -170,8 +170,18 @@ export default function BillingPrompt({
     }
 
     if (!(bestProductFit && bestPrice && price)) {
+      // While products load we don't yet know if a plan fits. Render a plain
+      // loading button here — `asChild` + `loading` can't coexist because the
+      // spinner would give Radix's <Slot> a second child (React.Children.only).
+      if (isLoadingProducts) {
+        return (
+          <Button className="w-full" loading size="lg">
+            Loading plans
+          </Button>
+        );
+      }
       return (
-        <Button asChild className="w-full" loading={isLoadingProducts} size="lg">
+        <Button asChild className="w-full" size="lg">
           <a href="mailto:hello@openpanel.dev?subject=Custom plan">
             Get a custom plan
           </a>

@@ -4,7 +4,8 @@
   "main": "index.ts",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "codegen": "jiti scripts/download.ts"
+    "codegen": "jiti scripts/download.ts && jiti scripts/get-datacenter-asns.ts",
+    "gen:asns": "jiti scripts/get-datacenter-asns.ts"
   },
   "dependencies": {
     "@maxmind/geoip2-node": "^6.1.0",

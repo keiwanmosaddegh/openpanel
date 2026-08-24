@@ -28,6 +28,7 @@ import EditReport from './edit-report';
 import EventDetails from './event-details';
 import InsightDetails from './insight-details';
 import Instructions from './Instructions';
+import MoveReport from './move-report';
 import OverviewChartDetails from './overview-chart-details';
 import OverviewFilters from './overview-filters';
 import TableFilters from './table-filters';
@@ -67,6 +68,7 @@ const modals = {
   ConfirmDeleteAccount,
   ConfirmDeleteOrganization,
   SaveReport,
+  MoveReport,
   AddDashboard,
   EditDashboard,
   EditReport,

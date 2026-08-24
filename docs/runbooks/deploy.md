@@ -145,7 +145,7 @@ CH() { docker exec self-hosting-op-ch-1 clickhouse-client --query "$1"; }
 D=$(docker inspect self-hosting-op-api-1 --format '{{.State.StartedAt}}' | cut -c1-19 | tr 'T' ' ')
 ```
 
-**Enough?** Against the same clock window on previous days. A raw pre/post diff is worthless — traffic swings hours-wide on its own, so an evening decline reads as a collapse.
+**Enough?** Against the same clock window on previous days. A raw pre/post diff is worthless — traffic swings hours-wide on its own, so an evening decline reads as a collapse. (A deploy straddling midnight inverts the clock bounds and the baseline comes back empty — compare a fixed window on prior days instead.)
 
 ```bash
 CH "SELECT toDate(created_at) AS day, count() AS events, uniqExact(project_id) AS projects
@@ -153,28 +153,43 @@ CH "SELECT toDate(created_at) AS day, count() AS events, uniqExact(project_id) A
       AND toTime(created_at) >= toTime(toDateTime('$D')) AND toTime(created_at) < toTime(now())
     GROUP BY day ORDER BY day"
 
-# per project, because an aggregate hides one dark tenant
-CH "SELECT project_id, countIf(created_at >= '$D') AS post, countIf(created_at < '$D') AS pre
-    FROM openpanel.events WHERE created_at >= toDateTime('$D') - INTERVAL 1 HOUR
+# per project, because an aggregate hides one dark tenant. Both sides span the same
+# duration — an hour of `pre` against ten minutes of `post` reads as a collapse.
+CH "SELECT project_id,
+      countIf(created_at >= toDateTime('$D')) AS post,
+      countIf(created_at <  toDateTime('$D')) AS pre
+    FROM openpanel.events
+    WHERE created_at >= toDateTime('$D') - (now() - toDateTime('$D'))
     GROUP BY project_id ORDER BY pre DESC"
 ```
 
 **Whole?** The failure that hides: events keep arriving at normal volume with their contents stripped, so counts look right while every property-derived metric tanks.
 
 ```bash
-CH "SELECT if(created_at >= '$D','POST','PRE') AS w, count() AS events,
+CH "SELECT if(created_at >= toDateTime('$D'),'POST','PRE') AS w, count() AS events,
       round(100*countIf(session_id!='')/count(),1) AS pct_session,
       round(100*countIf(profile_id!='')/count(),1) AS pct_profile,
       round(100*countIf(length(properties)>0)/count(),1) AS pct_props,
       round(avg(length(properties)),1) AS avg_keys
-    FROM openpanel.events WHERE created_at >= toDateTime('$D') - INTERVAL 1 HOUR
+    FROM openpanel.events
+    WHERE created_at >= toDateTime('$D') - (now() - toDateTime('$D'))
     GROUP BY w ORDER BY w DESC"
+
+# and that no event name vanished — one dead SDK path hides inside a healthy total
+CH "SELECT name,
+      countIf(created_at >= toDateTime('$D')) AS post,
+      countIf(created_at <  toDateTime('$D')) AS pre
+    FROM openpanel.events
+    WHERE created_at >= toDateTime('$D') - (now() - toDateTime('$D'))
+    GROUP BY name ORDER BY pre DESC LIMIT 15"
 ```
 
 Reading the numbers:
 
 - **A real break moves everything one way at once.** Mixed movement across small projects is variance. Judge on the largest project and the aggregate; a low-volume project swinging ±50% between short windows is noise, and an intermittent one showing zero may simply not have emitted — widen the window before calling it dark.
 - **Never read the trailing window as a trend.** Cron-written events land backdated: `session_end` carries the session's end time, and the reaper's 30-min deadman puts it 30–35 min behind wall clock, so the newest buckets are *always* empty and fill in later. Confirm a suspected stall by watching the bucket backfill, never by its emptiness. The worker counters settle it outright — `session_ends_emitted_total` and `_skipped_total` at `localhost:3000/metrics`, per replica.
+
+Done when volume sits inside the prior-days band, every project reporting before the boundary still reports, shape rates are at or above `PRE`, and no event name has gone to zero. A shortfall that survives both readings above is a red signal with no row in §2's table: report it and wait.
 
 ## Validation record
 

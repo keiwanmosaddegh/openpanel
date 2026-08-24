@@ -204,5 +204,8 @@ Done when volume sits inside the prior-days band, every project reporting before
   gated on 865/865. Four migrations applied on op-api start; both ClickHouse backfills
   (`MATERIALIZE INDEX`, `MATERIALIZE PROJECTION`) reached `is_done=1` inside the babysit
   without blocking startup. §7 first exercised: it cleared the release, and its trailing-
-  window rule caught a false alarm the raw bucket counts had produced. Rollback-via-release
-  still untested.
+  window rule caught a false alarm the raw bucket counts had produced. §2 row 4 also had
+  its first live run: the 30-min babysit reported `10 failed checks` that were one
+  `ECONNRESET` warning on `POST /track` counted across ten overlapping 10-min windows,
+  every other check green and the last 12 rounds 8/8 — reported, not rolled back.
+  Rollback-via-release still untested.

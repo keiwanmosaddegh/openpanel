@@ -14,15 +14,15 @@ Fork code sits in three places and the risk is not spread evenly across them:
 
 | | Where | Risk |
 |---|---|---|
-| **Fork-only** | files upstream doesn't have — `components/custom/`, `*.fork.ts`, `routers/fork/`, `sh/`, `docs/` | none — upstream cannot reach them |
+| **Fork-only** | files upstream doesn't have — `components/custom/`, `*.fork.ts`, `routers/fork/`, `sh/`, `docs/` | none, until one shares a namespace upstream also adds to |
 | **Upstream-only** | files the fork has never edited | none — take upstream's version whole |
-| **Seam** | files both sides edit | all of it |
+| **Seam** | files both sides edit | the conflicts, and the silent breaks |
 
 The fork's architecture exists to keep the seam small (`apps/start/src/config/README.md`), so the seam is normally a handful of files against a hundred incoming. Spend the session's attention there in that proportion.
 
 A seam that auto-merges cleanly is not a seam that is safe. Git merges disjoint *lines*, not intent: upstream renaming a helper that the fork's other hunk in the same file calls produces a clean merge and a dead feature. Clean auto-merge lowers the odds; it never discharges step 4.
 
-**Collisions** are the seam's blind spot, and the one that bites hardest. A seam needs both sides to edit one *file*; a collision needs only both sides to add different files to one *namespace* — the same directory, number series, enum, or registry. Git reports no conflict because no file was touched twice, so nothing in the merge output mentions it. `packages/db/code-migrations/` is the standing example: both sides number from the same series, so a fork `18-*.ts` and an upstream `18-*.ts` merge silently into one directory. `migrate.ts` keys on the full filename, so both run, but the order within a number is arbitrary. Check the namespace whenever both sides add to it.
+A **collision** is that same silent break one level up, where git does not even name the files. It needs no shared file — only both sides adding *different* files to one namespace something else enumerates: a directory that gets scanned, a number series. Nothing was touched twice, so the merge runs clean and its output never mentions it. `packages/db/code-migrations/` is the standing case: both sides number from the same series, so a fork `18-*.ts` and an upstream `18-*.ts` land in one directory and the order within a number stops being anyone's decision.
 
 ## 1. Map the surface
 
@@ -42,7 +42,7 @@ comm -12 <(git diff --diff-filter=A --name-only $MB HEAD | xargs -n1 dirname | s
 
 Read the fork's diff in **every seam file** now, before any conflict marker exists, and name what the fork is doing to each one. Resolving a hunk correctly requires knowing the intent it carries, and after the merge starts that intent is harder to read.
 
-Done when every seam file has a stated fork intent, every collision namespace has been opened and checked for a real clash, and the fork-only list is written down — it is the checklist step 4 spends.
+Done when every seam file has a stated fork intent, every collision namespace has a verdict, and the fork-only list is written down — it is the checklist step 4 spends.
 
 ## 2. Read what upstream brings
 
@@ -62,7 +62,7 @@ Two outputs, both written down:
 
 ## 4. Verify
 
-**Regenerate first — `pnpm install && pnpm codegen`.** Node_modules and the Prisma client are derived from files the merge just changed, so until they are rebuilt the checks report the stale artifact, not the merge: upstream adding a dependency or a Prisma enum value throws dozens of errors that have nothing to do with your resolution. Chasing those is the most expensive way to waste a sync.
+**Regenerate first: `pnpm install && pnpm codegen`.** Node_modules and the Prisma client derive from files the merge just changed, so until they are rebuilt the checks grade the stale artifact rather than the merge — an added upstream dependency or a new Prisma enum value throws dozens of errors that have nothing to do with your resolution.
 
 Then the mechanical pass: `pnpm typecheck`, then `pnpm test`. These catch renames and dangling imports, and nothing else — and the test workspace excludes `apps/start`, where most fork features live. The dashboard has no mechanical net at all.
 
@@ -75,7 +75,9 @@ Done when every fork feature is confirmed present and coherent, one by one. A gr
 
 ## 5. Commit the merge
 
-The merge commit carries only what integrating upstream required. Step 4's regeneration is the thing that quietly violates this: `codegen` rewrites *tracked* artifacts from live sources, so a geo or data-derived file picks up drift that has nothing to do with the merge. Diff the staged tree against `upstream/main` — everything that differs should be a fork file you recognise. Restore any artifact that differs only by regeneration drift (`git checkout upstream/main -- <path>`) and refresh it in its own commit if it is wanted. State: what upstream brings and why it was wanted, what conflicted and how each was resolved, that fork features are preserved, and any deploy-time step the merge introduces (migrations, new crons, env). Match the shape already in `git log --merges`.
+The merge commit carries only what integrating upstream required, and step 4's regeneration is what quietly breaks that: `codegen` rewrites *tracked* artifacts from live sources, so they arrive carrying **drift** the merge never asked for. Diff the staged tree against `upstream/main` — everything that differs should be a fork file you recognise. Restore the drift-only ones (`git checkout upstream/main -- <path>`), and refresh them in their own commit if that is wanted.
+
+State: what upstream brings and why it was wanted, what conflicted and how each was resolved, any collision left standing, that fork features are preserved, and any deploy-time step the merge introduces (migrations, new crons, env). Match the shape already in `git log --merges`.
 
 ## 6. Retire the superseded
 

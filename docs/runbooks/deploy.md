@@ -25,7 +25,7 @@ A command below only takes an argument when you are rolling back.
 ./sh/docker-release           # :2 → the build of HEAD (instant; prod untouched until ship)
 ./sh/ship                     # VPS: backup + update (~30 s outage) + revision-pinned verify
 ./sh/verify-prod --watch 15   # detached babysit; poll the printed command for BABYSIT RESULT
-# meanwhile: run the acceptance check (§1), then report (§5)
+# meanwhile: acceptance check (§1) + data-flow audit (§7), then report (§6)
 ```
 
 Each command is independently re-runnable; a failure leaves no half-state (the build is
@@ -66,6 +66,7 @@ Notes on preflight's ⛔ exits and warnings:
 | Hard failure on 2 consecutive runs (containers unhealthy, API health down, freshness stale, restart deltas climbing, wrong revision) — **code-only release** | **Auto-rollback** (§3), re-verify, then report what happened. |
 | Same hard failure — **release ran any migration** | ⛔ **Freeze.** Don't roll back: code rollback against a migrated schema is an informed human judgment, and a pg restore drops post-backup writes. Report state + the prepared §3 commands, wait. |
 | Unknown error-log lines as the *only* red signal | ⛔ Report the lines, keep babysitting. Never roll back on logs alone — known noise exists (§5 gotcha 8). |
+| Volume, project coverage, or field population off baseline (§7) | ⛔ Report the numbers and wait. Establish whether the anomaly predates the deploy before treating it as the release's — capture can break from causes the release never touched. |
 | Any red signal matching no row above | ⛔ Report and wait. |
 
 Ship's built-in verify follows row 1: one hard failure earns exactly one re-run, and a
@@ -134,6 +135,47 @@ Worked example: the v1→v2 upgrade plan, Phase 4.8 (retired after completion; s
   outcome, backup filename, and — if anything went red — the exact failing output.
   Report faithfully; a failed check is reported as failed.
 
+## 7. Data-flow audit
+
+`verify-deploy` proves events are **arriving** — "newest event 9s old" is a freshness probe, and it passes while volume sits at a tenth of normal, one tenant is dark, or every event arrives stripped of its properties. Releases have broken capture exactly that way, so 8/8 green is not evidence the data is intact. Two further questions, run in the babysit window and reported with the rest (§6). The boundary is read off prod, never typed:
+
+```bash
+# ssh root@91.98.228.238, then:
+CH() { docker exec self-hosting-op-ch-1 clickhouse-client --query "$1"; }
+D=$(docker inspect self-hosting-op-api-1 --format '{{.State.StartedAt}}' | cut -c1-19 | tr 'T' ' ')
+```
+
+**Enough?** Against the same clock window on previous days. A raw pre/post diff is worthless — traffic swings hours-wide on its own, so an evening decline reads as a collapse.
+
+```bash
+CH "SELECT toDate(created_at) AS day, count() AS events, uniqExact(project_id) AS projects
+    FROM openpanel.events WHERE created_at >= today() - 7
+      AND toTime(created_at) >= toTime(toDateTime('$D')) AND toTime(created_at) < toTime(now())
+    GROUP BY day ORDER BY day"
+
+# per project, because an aggregate hides one dark tenant
+CH "SELECT project_id, countIf(created_at >= '$D') AS post, countIf(created_at < '$D') AS pre
+    FROM openpanel.events WHERE created_at >= toDateTime('$D') - INTERVAL 1 HOUR
+    GROUP BY project_id ORDER BY pre DESC"
+```
+
+**Whole?** The failure that hides: events keep arriving at normal volume with their contents stripped, so counts look right while every property-derived metric tanks.
+
+```bash
+CH "SELECT if(created_at >= '$D','POST','PRE') AS w, count() AS events,
+      round(100*countIf(session_id!='')/count(),1) AS pct_session,
+      round(100*countIf(profile_id!='')/count(),1) AS pct_profile,
+      round(100*countIf(length(properties)>0)/count(),1) AS pct_props,
+      round(avg(length(properties)),1) AS avg_keys
+    FROM openpanel.events WHERE created_at >= toDateTime('$D') - INTERVAL 1 HOUR
+    GROUP BY w ORDER BY w DESC"
+```
+
+Reading the numbers:
+
+- **A real break moves everything one way at once.** Mixed movement across small projects is variance. Judge on the largest project and the aggregate; a low-volume project swinging ±50% between short windows is noise, and an intermittent one showing zero may simply not have emitted — widen the window before calling it dark.
+- **Never read the trailing window as a trend.** Cron-written events land backdated: `session_end` carries the session's end time, and the reaper's 30-min deadman puts it 30–35 min behind wall clock, so the newest buckets are *always* empty and fill in later. Confirm a suspected stall by watching the bucket backfill, never by its emptiness. The worker counters settle it outright — `session_ends_emitted_total` and `_skipped_total` at `localhost:3000/metrics`, per replica.
+
 ## Validation record
 
 - **2026-06-04 (2.0.1, semver-era):** `./update` mechanics validated — non-interactive
@@ -142,3 +184,10 @@ Worked example: the v1→v2 upgrade plan, Phase 4.8 (retired after completion; s
 - **2026-06-05 (main-9a94993, first SHA deploy):** `docker-build all` / `docker-release` /
   revision check / babysit all validated live — 8/8 verify, all babysit rounds clean,
   acceptance check confirmed visually. Rollback-via-release still untested.
+- **2026-08-24 (main-de50629, 41-commit upstream sync):** the ⛔ migration-ack path ran
+  end to end — preflight exit 2, operator classified routine, `--migrations-ack` re-run
+  gated on 865/865. Four migrations applied on op-api start; both ClickHouse backfills
+  (`MATERIALIZE INDEX`, `MATERIALIZE PROJECTION`) reached `is_done=1` inside the babysit
+  without blocking startup. §7 first exercised: it cleared the release, and its trailing-
+  window rule caught a false alarm the raw bucket counts had produced. Rollback-via-release
+  still untested.

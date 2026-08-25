@@ -1,0 +1,92 @@
+<clickhouse>
+    <!-- Read-only ClickHouse access for the internal puzzlr team and its agents.
+         Copy to readonly-users.xml (gitignored, host-local like .env), then use
+         ./add-analytics-user <name> to append accounts to it. Adding or removing
+         a user is picked up by ClickHouse's config watcher within seconds — no
+         restart, no ingestion pause.
+
+         The copy must be readable by uid 101:
+
+           chown 101:101 readonly-users.xml && chmod 640 readonly-users.xml
+
+         clickhouse-server drops to that uid and treats an unreadable users.d
+         file as CANNOT_LOAD_CONFIG at *startup*, so a root-only mode here is
+         silent until the next restart and then a crash loop. Note that
+         `docker exec` reports root, which is the exec user, not the daemon's.
+    -->
+    <profiles>
+        <analytics_ro>
+            <!-- readonly=2 allows SELECT plus per-query settings, but no writes.
+                 Verified against 25.10.2: a session can tighten `readonly` and
+                 `allow_ddl` but cannot relax either (codes 164 / 392), so this
+                 is an enforced boundary rather than a convention. The grants
+                 below are the real fence; these two are the backstop. -->
+            <readonly>2</readonly>
+            <allow_ddl>0</allow_ddl>
+
+            <!-- Ad-hoc queries share 15 GB and 8 cores with live ingestion. Stay
+                 well under the 6 GB the app's default profile gets, and leave
+                 half the cores for the workers. -->
+            <max_memory_usage>2000000000</max_memory_usage>
+            <max_bytes_before_external_group_by>1000000000</max_bytes_before_external_group_by>
+            <max_bytes_before_external_sort>1000000000</max_bytes_before_external_sort>
+            <max_threads>4</max_threads>
+            <max_concurrent_queries_for_user>4</max_concurrent_queries_for_user>
+            <max_execution_time>60</max_execution_time>
+
+            <!-- A runaway guard, not a budget: a full scan of events is ~135M
+                 rows and legitimate; an accidental cross join is not. -->
+            <max_rows_to_read>2000000000</max_rows_to_read>
+            <max_result_rows>100000</max_result_rows>
+
+            <!-- The other half of the audit trail: clickhouse-config.xml keeps
+                 the query_log table alive, and the app's own profile leaves
+                 log_queries at 0, so switching it on here is what scopes that
+                 log to these accounts rather than to ingestion traffic. -->
+            <log_queries>1</log_queries>
+
+            <!-- Ceilings for anything raised per-query under readonly=2. -->
+            <constraints>
+                <max_execution_time><max>300</max></max_execution_time>
+                <max_memory_usage><max>2000000000</max></max_memory_usage>
+                <max_result_rows><max>1000000</max></max_result_rows>
+                <max_threads><max>4</max></max_threads>
+            </constraints>
+        </analytics_ro>
+    </profiles>
+
+    <quotas>
+        <analytics_ro>
+            <interval>
+                <duration>3600</duration>
+                <queries>500</queries>
+                <errors>100</errors>
+                <result_rows>10000000</result_rows>
+                <read_rows>50000000000</read_rows>
+                <execution_time>1800</execution_time>
+            </interval>
+        </analytics_ro>
+    </quotas>
+
+    <users>
+        <!-- One user per person or agent. Every request arrives from the Caddy
+             container, so the ClickHouse-side identity is the only thing that
+             distinguishes callers in query_log — and revoking one is a delete
+             of its block rather than a credential rotation for everybody. -->
+        <agent_example>
+            <password_sha256_hex>REPLACE_WITH_SHA256_HEX</password_sha256_hex>
+            <profile>analytics_ro</profile>
+            <quota>analytics_ro</quota>
+            <!-- Caddy terminates TLS and proxies, so ClickHouse only ever sees
+                 the Docker network address. Filtering here would match the
+                 proxy, not the caller; the password is the access control. -->
+            <networks><ip>::/0</ip></networks>
+            <grants>
+                <query>GRANT SELECT ON openpanel.*</query>
+                <!-- DESCRIBE, SHOW CREATE, system.columns — lets an agent learn
+                     the schema itself instead of relying on a written copy. -->
+                <query>GRANT SELECT ON system.*</query>
+            </grants>
+        </agent_example>
+    </users>
+</clickhouse>
